@@ -80,9 +80,22 @@ def run_exp(params):
         batch_size=32,
         learning_rate=0.001,
     )
-    model.learn(total_timesteps=params["train_len"], log_interval=4)
+    model.learn(total_timesteps=params["train_len"], log_interval=12)
 
-    env = gym.wrappers.TransformReward(env, lambda r : 100*r)
+    # new environment for testing 
+    env = gym.make(
+        "gym_examples/BatteryEnv-v0", 
+        nhistory=nhistory, 
+        data="periodic", 
+        mode=params["env_mode"], 
+        avoid_penalty=True,
+    )
+    env._max_episode_steps = 672
+    lows, highs = env.observation_space.low, env.observation_space.high
+    rng = highs - lows
+    if params.get("norm_obs", False):
+        env = gym.wrappers.TransformObservation(env, lambda obs : np.divide(obs - lows, rng))
+
     try:
         obs, info = env.reset()
         total_reward = 0
