@@ -50,7 +50,7 @@ def run_exp(params):
 
     fname = os.path.join(
         "logs", 
-        f"dqn_env_mode={params['env_mode']}_train_len={params['train_len']}_seed={params['seed']}.csv"
+        f"dqn_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
     )
     logger = SimpleLogger(fname, params["env_mode"])
 
@@ -63,6 +63,10 @@ def run_exp(params):
     )
 
     env._max_episode_steps = 672
+    lows, highs = env.observation_space.low, env.observation_space.high
+    rng = highs - lows
+    if params.get("norm_obs", False):
+        env = gym.wrappers.TransformObservation(env, lambda obs : np.divide(obs - lows, rng))
     env = gym.wrappers.TransformReward(env, lambda r : 0.01*r)
 
     model = DQN(
@@ -70,8 +74,9 @@ def run_exp(params):
         env, 
         verbose=1, 
         seed=params["seed"],
-        exploration_fraction=0.9,
         learning_starts=1024,
+        exploration_fraction=1, # use less exploration
+        exploration_final_eps=0.05,
         gradient_steps=1,
         batch_size=32,
         learning_rate=0.001,
@@ -122,10 +127,12 @@ def run_parallel_exp(params, num_exps):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--env_mode", type=str, required=True, choices=["delay", "qlearn"], help="Environment type")
+    parser.add_argument("--env_mode", type=str, required=True, choices=["delay", "qlearn", "penalize_full", "penalize_wait"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
     parser.add_argument("--parallel", action="store_true", help="Use multiprocessing to run experiments in parallel")
+
+    parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     params = vars(parser.parse_args())
 
     if params["seed"] < 0:
