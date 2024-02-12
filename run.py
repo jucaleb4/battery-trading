@@ -12,7 +12,6 @@ from stable_baselines3 import DQN
 class SimpleLogger():
     def __init__(self, fname, mode):
         """ Saves data for: (soc, lmp, action, total_rwd) """
-        assert mode == "delay" or mode == "qlearn"
         self.fname = fname
         self.mode = mode
         self.data_arr = np.zeros((128, 4), dtype=float)
@@ -23,9 +22,9 @@ class SimpleLogger():
         :param data: tuple given as (obs, action, total_rwd)
         """
         (obs, a , total_rwd) = data
-        (soc, lmp) = (0,0)
-        if self.mode == "delay":
-            (soc, lmp) = obs[:2]
+        (soc, lmp) = obs[0], obs[1]
+        if self.mode == "qlearn":
+            (soc, lmp) = (0,0)
         self.data_arr[self.ct] = (soc, lmp, a, total_rwd)
         self.ct += 1
 
