@@ -62,7 +62,7 @@ def run_exp(params):
         mode=params["env_mode"], 
     )
 
-    env._max_episode_steps = 256
+    env._max_episode_steps = 672
     env = gym.wrappers.TransformReward(env, lambda r : 0.01*r)
 
     model = DQN(
