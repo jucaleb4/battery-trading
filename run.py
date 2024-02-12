@@ -1,4 +1,5 @@
 import os
+import multiprocessing as mp
 
 import argparse
 import numpy as np
@@ -38,7 +39,7 @@ class SimpleLogger():
             np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
         print(f"Saved testing logs to {self.fname}")
 
-def run_exp(params, logger):
+def run_exp(params):
     """ Runs DQN experiment 
 
     :param seed: seed of DQN
@@ -46,6 +47,12 @@ def run_exp(params, logger):
     assert "env_mode" in params
     assert "seed" in params
     assert "train_len" in params
+
+    fname = os.path.join(
+        "logs", 
+        f"dqn_env_mode={params['env_mode']}_train_len={params['train_len']}_seed={params['seed']}.csv"
+    )
+    logger = SimpleLogger(fname, params["env_mode"])
 
     nhistory = 10
     env = gym.make(
@@ -89,6 +96,28 @@ def run_exp(params, logger):
     except KeyboardInterrupt:
         logger.save()
 
+def run_parallel_exp(params, num_exps):
+    if num_exps == None or num_exps < 1:
+        print("Need to pass in >= 1 experiments")
+        exit(0)
+
+    n_cores = mp.cpu_count()
+    n_cores_to_use = int(n_cores/2)
+    ps = [None] * n_cores_to_use
+    ct = 0
+
+    for seed in range(num_exps):
+        if ct == n_cores_to_use:
+            for p in ps:
+                p.join()
+            ct = 0
+
+        params_i = params.copy()
+        params_i["seed"] = seed
+        p = mp.Process(target=run_exp, args=(params_i,))
+        p.start()
+        ps[ct] = p
+        ct += 1
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -96,12 +125,13 @@ if __name__ == "__main__":
     parser.add_argument("--env_mode", type=str, required=True, choices=["delay", "qlearn"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
+    parser.add_argument("--parallel", action="store_true", help="Use multiprocessing to run experiments in parallel")
     params = vars(parser.parse_args())
 
     if params["seed"] < 0:
         params["seed"] = None
-
-    fname = os.path.join("logs", f"dqn_env_mode={params['env_mode']}_train_len={params['train_len']}_seed={params['seed']}.csv")
-    logger = SimpleLogger(fname, params["env_mode"])
     
-    run_exp(params, logger)
+    if params["parallel"]:
+        run_parallel_exp(params, params["seed"])
+    else:
+        run_exp(params)
