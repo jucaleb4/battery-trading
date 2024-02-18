@@ -4,7 +4,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if False:
+if True:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -56,7 +56,7 @@ def run_exp(params):
 
     fname = os.path.join(
         "logs", 
-        f"dqn_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
+        f"alg=dqn_data=real_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
     )
     logger = SimpleLogger(fname, params["env_mode"])
 
@@ -64,7 +64,7 @@ def run_exp(params):
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
         nhistory=nhistory, 
-        data="periodic", 
+        # data="periodic", 
         mode=params["env_mode"], 
     )
 
@@ -93,7 +93,7 @@ def run_exp(params):
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
         nhistory=nhistory, 
-        data="periodic", 
+        # data="periodic", 
         mode=params["env_mode"], 
         avoid_penalty=True,
     )
