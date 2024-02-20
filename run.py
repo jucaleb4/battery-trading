@@ -45,7 +45,7 @@ class SimpleLogger():
             np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
         print(f"Saved testing logs to {self.fname}")
 
-def run_exp(params):
+def run_qlearn(params):
     """ Runs DQN experiment 
 
     :param seed: seed of DQN
@@ -120,7 +120,12 @@ def run_exp(params):
     except KeyboardInterrupt:
         logger.save()
 
+def run_bangbang(params):
+
 def run_parallel_exp(params, num_exps):
+    """
+    # TODO: Make this run on Perlmutter 
+    """
     if num_exps == None or num_exps < 1:
         print("Need to pass in >= 1 experiments")
         exit(0)
@@ -138,7 +143,7 @@ def run_parallel_exp(params, num_exps):
 
         params_i = params.copy()
         params_i["seed"] = seed
-        p = mp.Process(target=run_exp, args=(params_i,))
+        p = mp.Process(target=run_qlearn, args=(params_i,))
         p.start()
         ps[ct] = p
         ct += 1
