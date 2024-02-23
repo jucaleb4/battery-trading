@@ -24,17 +24,21 @@ class SimpleLogger():
         self.data_arr = np.zeros((128, 4), dtype=float)
         self.ct = 0
         self.obs_scale = obs_scale
-        self.obs_scale = obs_scale
+        self.obs_shift = obs_shift
+        self.rwd_scale = rwd_scale
 
     def store(self, data):
         """ Stores data
         :param data: tuple given as (obs, action, total_rwd)
         """
         (obs, a , total_rwd) = data
-        (soc, lmp) = obs[0], obs[1]
+        normalized_obs = np.divide(obs, self.obs_scale) - self.obs_shift
+        rescaled_total_rwd = total_rwd/self.rwd_scale
+
+        (soc, lmp) = normalized_obs[0], normalized_obs[1]
         if self.mode == "qlearn":
             (soc, lmp) = (0,0)
-        self.data_arr[self.ct] = (soc, lmp, a, total_rwd)
+        self.data_arr[self.ct] = (soc, lmp, a, rescaled_total_rwd)
         self.ct += 1
 
         if self.ct == len(self.data_arr):
@@ -86,6 +90,16 @@ def validate(params, get_action):
     except KeyboardInterrupt:
         logger.save()
 
+def get_normalized_env(env):
+    lows, highs = env.observation_space.low, env.observation_space.high
+    obs_scale = np.reciprocal((highs - lows).astype("float"))
+    obs_shift = -lows
+    rwd_scale = 0.01
+    if params.get("norm_obs", False):
+        env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shift, obs_scale))
+    env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
+    return (env, obs_scale, obs_shift)
+
 def run_qlearn(params):
     """ Runs DQN experiment 
 
@@ -111,33 +125,29 @@ def run_qlearn(params):
         mode=params["env_mode"], 
     )
 
-    lows, highs = env.observation_space.low, env.observation_space.high
-    obs_scale = np.reciprocal((highs - lows).astype("float"))
-    obs_shift = -lows
-    rwd_scale = 0.01
+    obs_scale, obs_shift, rwd_scale = 1, 0, 1
     if params.get("norm_obs", False):
-        env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shirt, obs_scale))
-    env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
-    logger = SimpleLogger(fname, params["env_mode"], obs_scale=obs_scale, obs_shift=obs_shift, rwd_scale=rwd_scale)
+        (env, obs_scale, obs_shift) = get_normalized_env(env)
 
+    # train
     model = DQN(
         "MlpPolicy", 
         env, 
         verbose=1, 
         seed=params["seed"],
-        learning_starts=1024,
-        exploration_fraction=1, # use less exploration
+        learning_starts=100,
+        exploration_fraction=0.99, # use less exploration
         exploration_final_eps=0.05,
-        gradient_steps=1,
+        gradient_steps=-1,
         batch_size=32,
         learning_rate=0.001,
+        target_update_interval=100,
     )
     model.learn(total_timesteps=params["train_len"], log_interval=12)
 
-    lows, highs = env.observation_space.low, env.observation_space.high
-    rng = highs - lows
+    # validation
     def get_action(obs):
-        rescaled_obs = np.divide(obs - lows, rng)
+        rescaled_obs = np.divide(obs - obs_shift, obs_scale)
         action, _ = model.predict(obs, deterministic=True)
         return action
 
@@ -258,5 +268,5 @@ if __name__ == "__main__":
     if params["parallel"]:
         run_parallel_exp(params, params["seed"])
     else:
-        # run_qlearn(params)
-        run_bangbang_offline(params)
+        run_qlearn(params)
+        # run_bangbang_offline(params)
