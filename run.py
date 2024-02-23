@@ -17,12 +17,14 @@ import gym_examples
 from stable_baselines3 import DQN
 
 class SimpleLogger():
-    def __init__(self, fname, mode):
+    def __init__(self, fname, mode, obs_scale=1, obs_shift=0, rwd_scale=1):
         """ Saves data for: (soc, lmp, action, total_rwd) """
         self.fname = fname
         self.mode = mode
         self.data_arr = np.zeros((128, 4), dtype=float)
         self.ct = 0
+        self.obs_scale = obs_scale
+        self.obs_scale = obs_scale
 
     def store(self, data):
         """ Stores data
@@ -58,22 +60,26 @@ def run_exp(params):
         "logs", 
         f"alg=dqn_data=real_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
     )
-    logger = SimpleLogger(fname, params["env_mode"])
 
     nhistory = 10
+    train_horizon = 76*4*24
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
         nhistory=nhistory, 
-        # data="periodic", 
+        data="real", 
+        end_index=train_horizon,
+        max_episode_steps=train_horizon,
         mode=params["env_mode"], 
     )
 
-    env._max_episode_steps = 672
     lows, highs = env.observation_space.low, env.observation_space.high
-    rng = highs - lows
+    obs_scale = np.reciprocal((highs - lows).astype("float"))
+    obs_shift = -lows
+    rwd_scale = 0.01
     if params.get("norm_obs", False):
-        env = gym.wrappers.TransformObservation(env, lambda obs : np.divide(obs - lows, rng))
-    env = gym.wrappers.TransformReward(env, lambda r : 0.01*r)
+        env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shirt, obs_scale))
+    env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
+    logger = SimpleLogger(fname, params["env_mode"], obs_scale=obs_scale, obs_shift=obs_shift, rwd_scale=rwd_scale)
 
     model = DQN(
         "MlpPolicy", 
