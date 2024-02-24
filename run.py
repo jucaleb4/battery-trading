@@ -72,6 +72,7 @@ def validate(params, get_action):
         avoid_penalty=True,
         start_index=start_index,
         max_episode_steps=n_steps, # can change length here!"
+        more_data=params["more_data"],
     )
     try:
         obs, info = env.reset()
@@ -123,6 +124,7 @@ def run_qlearn(params):
         end_index=train_horizon,
         max_episode_steps=train_horizon,
         mode=params["env_mode"], 
+        more_data=params["more_data"],
     )
 
     obs_scale, obs_shift, rwd_scale = 1, 0, 1
@@ -258,6 +260,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
     parser.add_argument("--parallel", action="store_true", help="Use multiprocessing to run experiments in parallel")
+    parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
 
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     params = vars(parser.parse_args())
