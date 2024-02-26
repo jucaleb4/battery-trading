@@ -5,7 +5,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if True:
+if False:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -20,7 +20,24 @@ import gym_examples
 
 import wandb
 
-n_cpu = 10
+import warnings
+import functools
+
+from utils import TimelimitCallback
+
+def deprecated(func):
+    """This is a decorator which can be used to mark functions
+    as deprecated. It will result in a warning being emitted
+    when the function is used."""
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        warnings.simplefilter('always', DeprecationWarning)  # turn off filter
+        warnings.warn("Call to deprecated function {}.".format(func.__name__),
+                      category=DeprecationWarning,
+                      stacklevel=2)
+        warnings.simplefilter('default', DeprecationWarning)  # reset filter
+        return func(*args, **kwargs)
+    return new_func
 
 class SimpleLogger():
     def __init__(self, fname, mode, obs_scale=1, obs_shift=0, rwd_scale=1):
@@ -62,7 +79,7 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
     :param get_action: general function that takes in a current observation and outputs an action
     """
     obs = env.reset()
-    n_cpu = obs.shape[0]
+    n_cpu = obs.shape[0] if len(obs.shape) > 1 else 1
     action = get_action(obs)
     obs_arr = np.zeros((n_steps, n_cpu, obs.shape[1]))
     if len(action.shape) > 1:
@@ -77,9 +94,10 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
         total_reward = np.zeros(n_cpu, dtype=float)
         for t in range(n_steps):
             action = get_action(obs)
+            print(f"run.py [{t}]: ", action)
             (obs, reward, terminated, info) = env.step(action)
             # TODO: hacky, need more automatied way to do this
-            total_reward += 100*reward
+            total_reward += reward
             if t < n_steps-1:
                 obs_arr[t+1] = obs
             action_arr[t] = action
@@ -97,11 +115,9 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
                 logger.save()
 
         final_rewards = total_reward_arr[-1,:]
-        median_final_reward = np.median(final_rewards)
         print(f"All final rewards: {final_rewards}")
-        print(f"Final median reward: {median_final_reward}")
 
-        return (final_rewards, median_final_reward)
+        return final_rewards
 
     except KeyboardInterrupt:
         logger.save()
@@ -110,12 +126,10 @@ def get_normalized_env(env, params):
     lows, highs = env.observation_space.low, env.observation_space.high
     obs_scale = np.reciprocal((highs - lows).astype("float"))
     obs_shift = -lows
-    rwd_scale = 0.01
-    if params.get("norm_obs", False):
-        env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shift, obs_scale))
-    env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
+    env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shift, obs_scale))
     return (env, obs_scale, obs_shift)
 
+@deprecated
 def run_qlearn(params):
     """ Runs DQN experiment 
 
@@ -145,6 +159,8 @@ def run_qlearn(params):
     obs_scale, obs_shift, rwd_scale = 1, 0, 1
     if params.get("norm_obs", False):
         (env, obs_scale, obs_shift) = get_normalized_env(env, params)
+        rwd_scale = 1./100
+        env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
 
     # train
     model = DQN(
@@ -188,7 +204,6 @@ def run_n_qlearn(n_cpu, params):
     assert "batch_size" in params
     assert "learning_rate" in params
     assert "target_update_interval" in params
-    assert n_cpu > 1, f"Requies n_cpu > 1 (currently n_cpu={n_cpu})"
 
     params["start_index"] = 0 
     params["end_index"] = 4*24*76
@@ -200,6 +215,7 @@ def run_n_qlearn(n_cpu, params):
     # get normalizing factor (TODO: Is there a better way of doing this?)
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
+        seed=params["seed"],
         nhistory=params["nhistory"], 
         start_index=params["start_index"],
         end_index=params["end_index"],
@@ -207,14 +223,16 @@ def run_n_qlearn(n_cpu, params):
         mode=params["env_mode"], 
         more_data=params["more_data"],
     )
-    (_, obs_scale, obs_shift) = get_normalized_env(env, params)
+    if params["norm_obs"]:
+        print("run.py normalizing observations")
+        (_, obs_scale, obs_shift) = get_normalized_env(env, params)
 
     def make_env(rank: int, params={}, seed: int=0):
 
         def _init() -> gym.Env:
             env = gym.make(
                 "gym_examples/BatteryEnv-v0", 
-                seed=rank,
+                seed=params["seed"],
                 nhistory=params["nhistory"], 
                 start_index=params["start_index"],
                 end_index=params["end_index"],
@@ -223,6 +241,9 @@ def run_n_qlearn(n_cpu, params):
                 more_data=params["more_data"],
             )
             (env, obs_scale, obs_shift) = get_normalized_env(env, params)
+            if params["scale_rwd"]:
+                rwd_scale = 1./100
+                env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
             env.reset(seed=seed+rank)
             return env
 
@@ -231,6 +252,7 @@ def run_n_qlearn(n_cpu, params):
 
     print(f"Making {n_cpu} environments")
     s_time = time.time()
+    params["scale_rwd"] = True
     env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
     print(f"Finishing making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
     s_time = time.time()
@@ -248,7 +270,8 @@ def run_n_qlearn(n_cpu, params):
         learning_rate=params["learning_rate"],
         target_update_interval=params["target_update_interval"],
     )
-    model.learn(total_timesteps=params["train_len"], log_interval=1)
+    timelimit_check = TimelimitCallback()
+    model.learn(total_timesteps=params["train_len"], log_interval=1, callback=timelimit_check)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     def get_action(obs):
@@ -263,6 +286,7 @@ def run_n_qlearn(n_cpu, params):
     params["start_index"] = params["end_index"]
     params["end_index"] = 4*24*90
     n_steps = params["end_index"] - params["start_index"]
+    params["scale_rwd"] = False
     env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
     return n_validate(env, n_steps, params, get_action, obs_scale, obs_shift)
 
@@ -391,7 +415,7 @@ def get_wandb_tuning_sweep_id():
     }
     sweep_config['parameters'] = parameters_dict
 
-    sweep_id = wandb.sweep(sweep_config, project="battery-trading-rl")
+    sweep_id = wandb.sweep(sweep_config, project="battery-trading-rl-attempt2")
 
     return sweep_id
 
@@ -406,13 +430,18 @@ def wandb_run(config=None):
         params["more_data"] = True
         params["norm_obs"] = True
 
-        global n_cpu
+        n_cpu = 1
+        n_trials = 10
+        final_rewards_arr = np.zeros(n_trials, dtype=float)
 
-        (final_rewards, median_final_reward) = run_n_qlearn(n_cpu, params)
+        for i in range(n_trials):
+            params["seed"] = i
+            final_reward = run_n_qlearn(n_cpu, params)
+            final_rewards_arr[i] = np.median(final_reward)
 
         wandb.log({
-            "median_reward": median_final_reward, 
-            "all_rewards": final_rewards
+            "median_reward": np.median(final_rewards_arr), 
+            "all_rewards": final_rewards_arr,
         })    
 
 if __name__ == "__main__":
@@ -421,7 +450,6 @@ if __name__ == "__main__":
     parser.add_argument("--env_mode", type=str, default="delay", choices=["delay", "qlearn", "penalize_full", "penalize_wait"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
-    parser.add_argument("--parallel", action="store_true", help="Use multiprocessing to run experiments in parallel")
     parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
     parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
 
@@ -443,9 +471,7 @@ if __name__ == "__main__":
         n_runs = 64 
         sweep_id = get_wandb_tuning_sweep_id()
         wandb.agent(sweep_id, wandb_run, count=n_runs)
-    elif params["parallel"]:
-        print(f"n_cpu={n_cpu}")
-        (final_rewards, median_final_reward) = run_n_qlearn(n_cpu, params)
     else:
-        run_qlearn(params)
+        n_cpu = 1
+        run_n_qlearn(1, params)
         # run_bangbang_offline(params)
