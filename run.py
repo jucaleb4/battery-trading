@@ -5,7 +5,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if False:
+if True:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -20,7 +20,7 @@ import gym_examples
 
 import wandb
 
-n_cpu = 2
+n_cpu = 10
 
 class SimpleLogger():
     def __init__(self, fname, mode, obs_scale=1, obs_shift=0, rwd_scale=1):
@@ -70,7 +70,7 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
         action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
     else:
         action_arr = np.zeros((n_steps, n_cpu))
-    reward_arr = np.zeros((n_steps, n_cpu))
+    total_reward_arr = np.zeros((n_steps, n_cpu))
     try:
         obs = env.reset()
         obs_arr[0] = obs
@@ -78,11 +78,12 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
         for t in range(n_steps):
             action = get_action(obs)
             (obs, reward, terminated, info) = env.step(action)
-            total_reward += reward
+            # TODO: hacky, need more automatied way to do this
+            total_reward += 100*reward
             if t < n_steps-1:
                 obs_arr[t+1] = obs
             action_arr[t] = action
-            reward_arr[t] = reward
+            total_reward_arr[t] = total_reward
             if np.any(terminated):
                 obs = env.reset()
 
@@ -92,10 +93,10 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
                 logger = SimpleLogger(fname, params["env_mode"])
                 for t in range(n_steps):
                     obs_rescaled = np.divide(obs_arr[t,i], obs_scale) - obs_shift
-                    logger.store((obs_rescaled, action_arr[t,i], reward_arr[t,i]))
+                    logger.store((obs_rescaled, action_arr[t,i], total_reward_arr[t,i]))
                 logger.save()
 
-        final_rewards = reward_arr[-1,:]
+        final_rewards = total_reward_arr[-1,:]
         median_final_reward = np.median(final_rewards)
         print(f"All final rewards: {final_rewards}")
         print(f"Final median reward: {median_final_reward}")
@@ -213,6 +214,7 @@ def run_n_qlearn(n_cpu, params):
         def _init() -> gym.Env:
             env = gym.make(
                 "gym_examples/BatteryEnv-v0", 
+                seed=rank,
                 nhistory=params["nhistory"], 
                 start_index=params["start_index"],
                 end_index=params["end_index"],
@@ -400,7 +402,7 @@ def wandb_run(config=None):
         config = wandb.config
         params = dict(config)
         params["env_mode"] = "delay"
-        params["train_len"] = 10000
+        params["train_len"] = 100000
         params["more_data"] = True
         params["norm_obs"] = True
 
@@ -438,7 +440,7 @@ if __name__ == "__main__":
         params["seed"] = None
     
     if params["wandb_tune"]:
-        n_runs = 2
+        n_runs = 64 
         sweep_id = get_wandb_tuning_sweep_id()
         wandb.agent(sweep_id, wandb_run, count=n_runs)
     elif params["parallel"]:
