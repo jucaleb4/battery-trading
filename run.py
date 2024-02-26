@@ -51,47 +51,45 @@ class SimpleLogger():
             np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
         print(f"Saved testing logs to {self.fname}")
 
-def validate(params, get_action):
+def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
     """ Test/validates policy.
     :param get_action: general function that takes in a current observation and outputs an action
     """
-    nhistory = 10
-    start_index = 76*4*24
-    end_index = -1
-    data = "real"
-
-    logger = SimpleLogger(params["fname"], params["env_mode"])
-
-    # new environment for testing 
-    n_steps = (90*4*24)-start_index
-    env = gym.make(
-        "gym_examples/BatteryEnv-v0", 
-        nhistory=nhistory, 
-        data=data, 
-        mode=params["env_mode"], 
-        avoid_penalty=True,
-        start_index=start_index,
-        max_episode_steps=n_steps, # can change length here!"
-        more_data=params["more_data"],
-    )
+    obs, info = env.reset()
+    n_cpu = obs.shape[0]
+    action = get_action(obs)
+    obs_arr = np.zeros((n_steps, n_cpu, obs.shape[1]))
+    action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
+    reward_arr = np.zeros((n_steps, n_cpu))
     try:
         obs, info = env.reset()
-        total_reward = 0
-        for _ in range(n_steps):
+        total_reward = np.zeros(n_cpu, dtype=float)
+        for t in range(n_steps):
             action = get_action(obs)
-            obs, reward, terminated, truncated, info = env.step(int(action))
+            (obs, reward, terminated, info) = env.step(int(action))
             total_reward += reward
-            logger.store((obs, action, total_reward))
-            if terminated or truncated:
+            obs_arr[t] = obs
+            action_arr[t] = action
+            reward_arr[t] = reward
+            if terminated:
                 obs, info = env.reset()
 
-        logger.save()
-        print(f"Total reward: {total_reward}")
+        for i in range(n_cpu):
+            fname = f"{params['fname']}_seed={i}.csv"
+            logger = SimpleLogger(fnames, params["env_mode"])
+            for t in range(n_steps):
+                obs_rescaled = np.divide(obs_arr[t,i], obs_scale) - obs_shift
+                logger.store((obs_rescaled, action_arr[t,i], reward_arr[t,i]))
+            logger.save()
+
+        final_rewards = reward_arr[-1,:]
+        median_final_reward = np.median(final_rewards)
+        print(f"Final median reward: {median_final_reward}")
 
     except KeyboardInterrupt:
         logger.save()
 
-def get_normalized_env(env):
+def get_normalized_env(env, params):
     lows, highs = env.observation_space.low, env.observation_space.high
     obs_scale = np.reciprocal((highs - lows).astype("float"))
     obs_shift = -lows
@@ -129,7 +127,7 @@ def run_qlearn(params):
 
     obs_scale, obs_shift, rwd_scale = 1, 0, 1
     if params.get("norm_obs", False):
-        (env, obs_scale, obs_shift) = get_normalized_env(env)
+        (env, obs_scale, obs_shift) = get_normalized_env(env, params)
 
     # train
     model = DQN(
@@ -159,6 +157,91 @@ def run_qlearn(params):
     )
     params["fname"] = fname
     validate(params, get_action)
+
+def run_n_qlearn(n_cpu, params):
+    """ Runs multiple DQN experiments
+
+    :param n: number of environments
+    """
+    assert "env_mode" in params
+    assert "seed" in params
+    assert "train_len" in params
+    assert "policy_type" in params
+    assert "exploration_fraction" in params
+    assert "learning_starts" in params
+    assert "batch_size" in params
+    assert "learning_rate" in params
+    assert "target_update_interval" in params
+    assert n > 1, f"Number of processes n > 1 (currently n={n})"
+
+    params["start_index"] = 0 
+    params["end_index"] = 4*24*76
+    params["nhistory"] = 10
+
+    nhistory = 10
+    train_horizon = 76*4*24
+
+    # get normalizing factor (TODO: Is there a better way of doing this?)
+    env = gym.make(
+        "gym_examples/BatteryEnv-v0", 
+        nhistory=params["nhistory"], 
+        end_index=params["train_horizon"],
+        max_episode_steps=params["train_horizon"],
+        mode=params["env_mode"], 
+        more_data=params["more_data"],
+    )
+    (_, obs_scale, obs_shift) = get_normalized_env(env, params)
+
+    def make_env(env_id: str, rank: int, params={}, seed: int=0):
+
+        def _init() -> gym.Env:
+            env = gym.make(
+                "gym_examples/BatteryEnv-v0", 
+                nhistory=params["nhistory"], 
+                start_index=params["start_index"]
+                end_index=params["end_index"],
+                max_episode_steps=params["end_index"]-params["start_index"],
+                mode=params["env_mode"], 
+                more_data=params["more_data"],
+            )
+            (env, obs_scale, obs_shift) = get_normalized_env(env, params)
+            env.reset(seed=seed+rank)
+            return env
+
+        set_random_seed(seed)
+        return _init
+
+    env = SubprocVecEnv([make_env(env_id, i, params) for i in range(n_cpu)])
+
+    # train
+    model = DQN(
+        params["policy_type"], 
+        env, 
+        verbose=1, 
+        learning_starts=params["learning_starts"],
+        exploration_fraction=params["exploration_fraction"], 
+        exploration_final_eps=0.05,
+        gradient_steps=-1,
+        batch_size=params["batch_size"],
+        learning_rate=params["learning_rate"],
+        target_update_interval=params["target_update_interval"],
+    )
+    model.learn(total_timesteps=params["train_len"], log_interval=1)
+
+    def get_action(obs):
+        return model.predict(obs, deterministic=True)[0]
+
+    fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
+    fname_base += f"_train_len={params['train_len']}_norm_obs={params['norm_obs']}"
+    fname_base += f"_more_data={params['more_data']}"
+    fname = os.path.join("logs", fname_base)
+    params["fname"] = fname
+
+    params["start_index"] = params["end_index"]
+    params["end_index"] = 4*24*90
+    n_steps = params["end_index"] - params["start_index"]
+    env = SubprocVecEnv([make_env(env_id, i, params) for i in range(n_cpu)])
+    n_validate(env, n_steps, params, get_action, obs_scale, obs_shift)
 
 def run_bangbang_offline(params):
     (buy_price, sell_price) = (54.11, 114) # computed by Genetic algorithm offline
@@ -265,11 +348,18 @@ if __name__ == "__main__":
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     params = vars(parser.parse_args())
 
+    params["policy_type"] = "MlpPolicy"
+    params["exploration_fractiona" = 0.99
+    params["learning_starts"] = 100
+    params["batch_size"] = 32
+    params["learning_rate"] = 0.001
+    params["target_update_interval"] = 100
+
     if params["seed"] < 0:
         params["seed"] = None
     
     if params["parallel"]:
-        run_parallel_exp(params, params["seed"])
+        run_n_qlearn(n_cpu, params):
     else:
         run_qlearn(params)
         # run_bangbang_offline(params)
