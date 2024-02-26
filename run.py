@@ -1,4 +1,5 @@
 import os
+import time
 import multiprocessing as mp
 
 import numpy as np
@@ -172,7 +173,7 @@ def run_n_qlearn(n_cpu, params):
     assert "batch_size" in params
     assert "learning_rate" in params
     assert "target_update_interval" in params
-    assert n > 1, f"Number of processes n > 1 (currently n={n})"
+    assert n_cpu > 1, f"Requies n_cpu > 1 (currently n_cpu={n_cpu})"
 
     params["start_index"] = 0 
     params["end_index"] = 4*24*76
@@ -198,7 +199,7 @@ def run_n_qlearn(n_cpu, params):
             env = gym.make(
                 "gym_examples/BatteryEnv-v0", 
                 nhistory=params["nhistory"], 
-                start_index=params["start_index"]
+                start_index=params["start_index"],
                 end_index=params["end_index"],
                 max_episode_steps=params["end_index"]-params["start_index"],
                 mode=params["env_mode"], 
@@ -211,7 +212,10 @@ def run_n_qlearn(n_cpu, params):
         set_random_seed(seed)
         return _init
 
+    print(f"Making {n_cpu} environments")
+    s_time = time.time()
     env = SubprocVecEnv([make_env(env_id, i, params) for i in range(n_cpu)])
+    print(f"Making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
 
     # train
     model = DQN(
@@ -349,7 +353,7 @@ if __name__ == "__main__":
     params = vars(parser.parse_args())
 
     params["policy_type"] = "MlpPolicy"
-    params["exploration_fractiona" = 0.99
+    params["exploration_fraction"] = 0.99
     params["learning_starts"] = 100
     params["batch_size"] = 32
     params["learning_rate"] = 0.001
@@ -359,7 +363,8 @@ if __name__ == "__main__":
         params["seed"] = None
     
     if params["parallel"]:
-        run_n_qlearn(n_cpu, params):
+        n_cpu = 4
+        run_n_qlearn(n_cpu, params)
     else:
         run_qlearn(params)
         # run_bangbang_offline(params)
