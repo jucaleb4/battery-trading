@@ -145,7 +145,7 @@ def run_qlearn(params):
         learning_rate=0.001,
         target_update_interval=100,
     )
-    model.learn(total_timesteps=params["train_len"], log_interval=12)
+    model.learn(total_timesteps=params["train_len"], log_interval=1)
 
     # validation
     def get_action(obs):
@@ -155,7 +155,7 @@ def run_qlearn(params):
 
     fname = os.path.join(
         "logs", 
-        f"alg=dqn_data=real_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
+        f"alg=dqn_data=real_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_more_data={params['more_data']}_seed={params['seed']}.csv"
     )
     params["fname"] = fname
     validate(params, get_action)
