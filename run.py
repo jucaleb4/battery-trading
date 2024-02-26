@@ -5,17 +5,22 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if True:
+if False:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
 
 import argparse
 
+from stable_baselines3 import DQN
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.utils import set_random_seed
 import gymnasium as gym
 import gym_examples
 
-from stable_baselines3 import DQN
+import wandb
+
+n_cpu = 2
 
 class SimpleLogger():
     def __init__(self, fname, mode, obs_scale=1, obs_shift=0, rwd_scale=1):
@@ -56,36 +61,46 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
     """ Test/validates policy.
     :param get_action: general function that takes in a current observation and outputs an action
     """
-    obs, info = env.reset()
+    obs = env.reset()
     n_cpu = obs.shape[0]
     action = get_action(obs)
     obs_arr = np.zeros((n_steps, n_cpu, obs.shape[1]))
-    action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
+    if len(action.shape) > 1:
+        # TODO: Does this work?
+        action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
+    else:
+        action_arr = np.zeros((n_steps, n_cpu))
     reward_arr = np.zeros((n_steps, n_cpu))
     try:
-        obs, info = env.reset()
+        obs = env.reset()
+        obs_arr[0] = obs
         total_reward = np.zeros(n_cpu, dtype=float)
         for t in range(n_steps):
             action = get_action(obs)
-            (obs, reward, terminated, info) = env.step(int(action))
+            (obs, reward, terminated, info) = env.step(action)
             total_reward += reward
-            obs_arr[t] = obs
+            if t < n_steps-1:
+                obs_arr[t+1] = obs
             action_arr[t] = action
             reward_arr[t] = reward
-            if terminated:
-                obs, info = env.reset()
+            if np.any(terminated):
+                obs = env.reset()
 
-        for i in range(n_cpu):
-            fname = f"{params['fname']}_seed={i}.csv"
-            logger = SimpleLogger(fnames, params["env_mode"])
-            for t in range(n_steps):
-                obs_rescaled = np.divide(obs_arr[t,i], obs_scale) - obs_shift
-                logger.store((obs_rescaled, action_arr[t,i], reward_arr[t,i]))
-            logger.save()
+        if len(params.get('fname', '')) > 0:
+            for i in range(n_cpu):
+                fname = f"{params['fname']}_seed={i}.csv"
+                logger = SimpleLogger(fname, params["env_mode"])
+                for t in range(n_steps):
+                    obs_rescaled = np.divide(obs_arr[t,i], obs_scale) - obs_shift
+                    logger.store((obs_rescaled, action_arr[t,i], reward_arr[t,i]))
+                logger.save()
 
         final_rewards = reward_arr[-1,:]
         median_final_reward = np.median(final_rewards)
+        print(f"All final rewards: {final_rewards}")
         print(f"Final median reward: {median_final_reward}")
+
+        return (final_rewards, median_final_reward)
 
     except KeyboardInterrupt:
         logger.save()
@@ -165,7 +180,6 @@ def run_n_qlearn(n_cpu, params):
     :param n: number of environments
     """
     assert "env_mode" in params
-    assert "seed" in params
     assert "train_len" in params
     assert "policy_type" in params
     assert "exploration_fraction" in params
@@ -186,14 +200,15 @@ def run_n_qlearn(n_cpu, params):
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
         nhistory=params["nhistory"], 
-        end_index=params["train_horizon"],
-        max_episode_steps=params["train_horizon"],
+        start_index=params["start_index"],
+        end_index=params["end_index"],
+        max_episode_steps=params["end_index"],
         mode=params["env_mode"], 
         more_data=params["more_data"],
     )
     (_, obs_scale, obs_shift) = get_normalized_env(env, params)
 
-    def make_env(env_id: str, rank: int, params={}, seed: int=0):
+    def make_env(rank: int, params={}, seed: int=0):
 
         def _init() -> gym.Env:
             env = gym.make(
@@ -214,8 +229,9 @@ def run_n_qlearn(n_cpu, params):
 
     print(f"Making {n_cpu} environments")
     s_time = time.time()
-    env = SubprocVecEnv([make_env(env_id, i, params) for i in range(n_cpu)])
-    print(f"Making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
+    env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
+    print(f"Finishing making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
+    s_time = time.time()
 
     # train
     model = DQN(
@@ -225,12 +241,13 @@ def run_n_qlearn(n_cpu, params):
         learning_starts=params["learning_starts"],
         exploration_fraction=params["exploration_fraction"], 
         exploration_final_eps=0.05,
-        gradient_steps=-1,
+        gradient_steps=params["gradient_steps"],
         batch_size=params["batch_size"],
         learning_rate=params["learning_rate"],
         target_update_interval=params["target_update_interval"],
     )
     model.learn(total_timesteps=params["train_len"], log_interval=1)
+    print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     def get_action(obs):
         return model.predict(obs, deterministic=True)[0]
@@ -244,8 +261,8 @@ def run_n_qlearn(n_cpu, params):
     params["start_index"] = params["end_index"]
     params["end_index"] = 4*24*90
     n_steps = params["end_index"] - params["start_index"]
-    env = SubprocVecEnv([make_env(env_id, i, params) for i in range(n_cpu)])
-    n_validate(env, n_steps, params, get_action, obs_scale, obs_shift)
+    env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
+    return n_validate(env, n_steps, params, get_action, obs_scale, obs_shift)
 
 def run_bangbang_offline(params):
     (buy_price, sell_price) = (54.11, 114) # computed by Genetic algorithm offline
@@ -314,40 +331,97 @@ def run_bangbang_online(params):
     lbs, ubs = [-25, 0], [100, 200]
     x = genetic.optimize(objective, lbs, ubs, n_iter=100, n_pop=50, seed=None)
 
-def run_parallel_exp(params, num_exps):
-    """
-    # TODO: Make this run on Perlmutter 
-    """
-    if num_exps == None or num_exps < 1:
-        print("Need to pass in >= 1 experiments")
-        exit(0)
+def get_wandb_tuning_sweep_id():
+    sweep_config = {
+        "method": "random",
+    }
 
-    n_cores = mp.cpu_count()
-    n_cores_to_use = int(n_cores/2)
-    ps = [None] * n_cores_to_use
-    ct = 0
+    metric = {
+        'name': 'median_reward',
+        'goal': 'maximize'
+    }
+    sweep_config['metric'] = metric
 
-    for seed in range(num_exps):
-        if ct == n_cores_to_use:
-            for p in ps:
-                p.join()
-            ct = 0
+    parameters_dict = {
+        'policy_type': { 
+            'values': ['MlpPolicy'],
+        },
+        'train_freq': {
+            'values': [4, (5, "step"), (2, "episode")],
+        },
+        'exploration_fraction': {  # a flat distribution between 0 and 0.1
+            'distribution': 'uniform',
+            'min': 0.9,
+            'max': 0.995,
+        },
+        'learning_starts': { # integers between 32 and 256 with evenly-distributed logarithms
+            'distribution': 'q_log_uniform_values',
+            'q': 10,
+            'min': 10,
+            'max': 1000,
+        },
+        'gradient_steps': { 
+            'values': [-1, 1, 10, 100],
+        },
+        'batch_size': { 
+            'distribution': 'q_log_uniform_values',
+            'q': 4,
+            'min': 16,
+            'max': 256,
+        },
+        'learning_rate': { 
+            'distribution': 'uniform',
+            'min': 0,
+            'max': 0.1
+        },
+        'target_update_interval': { 
+            'distribution': 'q_log_uniform_values',
+            'q': 10,
+            'min': 10,
+            'max': 1000,
+        },
+        'max_grad_norm': {
+            'distribution': 'q_log_uniform_values',
+            'q': 10,
+            'min': 10,
+            'max': 10000,
+        },
+    }
+    sweep_config['parameters'] = parameters_dict
 
-        params_i = params.copy()
-        params_i["seed"] = seed
-        p = mp.Process(target=run_qlearn, args=(params_i,))
-        p.start()
-        ps[ct] = p
-        ct += 1
+    sweep_id = wandb.sweep(sweep_config, project="battery-trading-rl")
+
+    return sweep_id
+
+def wandb_run(config=None):
+
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        config = wandb.config
+        params = dict(config)
+        params["env_mode"] = "delay"
+        params["train_len"] = 10000
+        params["more_data"] = True
+        params["norm_obs"] = True
+
+        global n_cpu
+
+        (final_rewards, median_final_reward) = run_n_qlearn(n_cpu, params)
+
+        wandb.log({
+            "median_reward": median_final_reward, 
+            "all_rewards": final_rewards
+        })    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--env_mode", type=str, required=True, choices=["delay", "qlearn", "penalize_full", "penalize_wait"], help="Environment type")
+    parser.add_argument("--env_mode", type=str, default="delay", choices=["delay", "qlearn", "penalize_full", "penalize_wait"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
     parser.add_argument("--parallel", action="store_true", help="Use multiprocessing to run experiments in parallel")
     parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
+    parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
 
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     params = vars(parser.parse_args())
@@ -355,6 +429,7 @@ if __name__ == "__main__":
     params["policy_type"] = "MlpPolicy"
     params["exploration_fraction"] = 0.99
     params["learning_starts"] = 100
+    params["gradient_steps"] = -1
     params["batch_size"] = 32
     params["learning_rate"] = 0.001
     params["target_update_interval"] = 100
@@ -362,9 +437,13 @@ if __name__ == "__main__":
     if params["seed"] < 0:
         params["seed"] = None
     
-    if params["parallel"]:
-        n_cpu = 4
-        run_n_qlearn(n_cpu, params)
+    if params["wandb_tune"]:
+        n_runs = 2
+        sweep_id = get_wandb_tuning_sweep_id()
+        wandb.agent(sweep_id, wandb_run, count=n_runs)
+    elif params["parallel"]:
+        print(f"n_cpu={n_cpu}")
+        (final_rewards, median_final_reward) = run_n_qlearn(n_cpu, params)
     else:
         run_qlearn(params)
         # run_bangbang_offline(params)
