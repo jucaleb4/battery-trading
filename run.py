@@ -5,7 +5,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if False:
+if True:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -17,6 +17,8 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 import gymnasium as gym
 import gym_examples
+from gymnasium.wrappers import NormalizeObservation
+from gymnasium.wrappers import NormalizeReward
 
 import wandb
 
@@ -40,28 +42,23 @@ def deprecated(func):
     return new_func
 
 class SimpleLogger():
-    def __init__(self, fname, mode, obs_scale=1, obs_shift=0, rwd_scale=1):
+    def __init__(self, fname, mode):
         """ Saves data for: (soc, lmp, action, total_rwd) """
         self.fname = fname
         self.mode = mode
         self.data_arr = np.zeros((128, 4), dtype=float)
         self.ct = 0
-        self.obs_scale = obs_scale
-        self.obs_shift = obs_shift
-        self.rwd_scale = rwd_scale
 
     def store(self, data):
         """ Stores data
         :param data: tuple given as (obs, action, total_rwd)
         """
         (obs, a , total_rwd) = data
-        normalized_obs = np.divide(obs, self.obs_scale) - self.obs_shift
-        rescaled_total_rwd = total_rwd/self.rwd_scale
 
-        (soc, lmp) = normalized_obs[0], normalized_obs[1]
+        (soc, lmp) = obs[0], obs[1]
         if self.mode == "qlearn":
             (soc, lmp) = (0,0)
-        self.data_arr[self.ct] = (soc, lmp, a, rescaled_total_rwd)
+        self.data_arr[self.ct] = (soc, lmp, a, total_rwd)
         self.ct += 1
 
         if self.ct == len(self.data_arr):
@@ -74,14 +71,13 @@ class SimpleLogger():
             np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
         print(f"Saved testing logs to {self.fname}")
 
-def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
+def n_validate(env, n_steps, params, get_action):
     """ Test/validates policy.
     :param get_action: general function that takes in a current observation and outputs an action
     """
     obs = env.reset()
     n_cpu = obs.shape[0] if len(obs.shape) > 1 else 1
     action = get_action(obs)
-    obs_arr = np.zeros((n_steps, n_cpu, obs.shape[1]))
     if len(action.shape) > 1:
         # TODO: Does this work?
         action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
@@ -90,16 +86,13 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
     total_reward_arr = np.zeros((n_steps, n_cpu))
     try:
         obs = env.reset()
-        obs_arr[0] = obs
         total_reward = np.zeros(n_cpu, dtype=float)
         for t in range(n_steps):
             action = get_action(obs)
-            print(f"run.py [{t}]: ", action)
+            # print(f"run.py [{t}]: ", action)
             (obs, reward, terminated, info) = env.step(action)
             # TODO: hacky, need more automatied way to do this
             total_reward += reward
-            if t < n_steps-1:
-                obs_arr[t+1] = obs
             action_arr[t] = action
             total_reward_arr[t] = total_reward
             if np.any(terminated):
@@ -110,8 +103,7 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
                 fname = f"{params['fname']}_seed={i}.csv"
                 logger = SimpleLogger(fname, params["env_mode"])
                 for t in range(n_steps):
-                    obs_rescaled = np.divide(obs_arr[t,i], obs_scale) - obs_shift
-                    logger.store((obs_rescaled, action_arr[t,i], total_reward_arr[t,i]))
+                    logger.store((obs[i], action_arr[t,i], total_reward_arr[t,i]))
                 logger.save()
 
         final_rewards = total_reward_arr[-1,:]
@@ -121,13 +113,6 @@ def n_validate(env, n_steps, params, get_action, obs_scale, obs_shift):
 
     except KeyboardInterrupt:
         logger.save()
-
-def get_normalized_env(env, params):
-    lows, highs = env.observation_space.low, env.observation_space.high
-    obs_scale = np.reciprocal((highs - lows).astype("float"))
-    obs_shift = -lows
-    env = gym.wrappers.TransformObservation(env, lambda obs : np.multiply(obs + obs_shift, obs_scale))
-    return (env, obs_scale, obs_shift)
 
 @deprecated
 def run_qlearn(params):
@@ -144,7 +129,7 @@ def run_qlearn(params):
         f"alg=dqn_data=real_env_mode={params['env_mode']}_train_len={params['train_len']}_norm_obs={params['norm_obs']}_seed={params['seed']}.csv"
     )
 
-    nhistory = 10
+    nhistory = 16
     train_horizon = 76*4*24
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
@@ -207,25 +192,10 @@ def run_n_qlearn(n_cpu, params):
 
     params["start_index"] = 0 
     params["end_index"] = 4*24*76
-    params["nhistory"] = 10
+    params["nhistory"] = 16
 
-    nhistory = 10
+    nhistory = 16
     train_horizon = 76*4*24
-
-    # get normalizing factor (TODO: Is there a better way of doing this?)
-    env = gym.make(
-        "gym_examples/BatteryEnv-v0", 
-        seed=params["seed"],
-        nhistory=params["nhistory"], 
-        start_index=params["start_index"],
-        end_index=params["end_index"],
-        max_episode_steps=params["end_index"],
-        mode=params["env_mode"], 
-        more_data=params["more_data"],
-    )
-    if params["norm_obs"]:
-        print("run.py normalizing observations")
-        (_, obs_scale, obs_shift) = get_normalized_env(env, params)
 
     def make_env(rank: int, params={}, seed: int=0):
 
@@ -238,12 +208,18 @@ def run_n_qlearn(n_cpu, params):
                 end_index=params["end_index"],
                 max_episode_steps=params["end_index"]-params["start_index"],
                 mode=params["env_mode"], 
-                more_data=params["more_data"],
+                daily_cost=params["daily_cost"],
+                more_data=True,
+                delay_cost=True,
             )
-            (env, obs_scale, obs_shift) = get_normalized_env(env, params)
-            if params["scale_rwd"]:
-                rwd_scale = 1./100
-                env = gym.wrappers.TransformReward(env, lambda r : rwd_scale*r)
+            env.reset(seed=seed+rank)
+            if params.get("norm_obs", False):
+                env = NormalizeObservation(env)
+            if params.get("norm_rwd", False):
+                env = NormalizeReward(env)
+            if params.get("norm_obs", False) or params.get("norm_rwd", False):
+                for _ in range(1000):
+                    env.step(env.action_space.sample())
             env.reset(seed=seed+rank)
             return env
 
@@ -252,7 +228,6 @@ def run_n_qlearn(n_cpu, params):
 
     print(f"Making {n_cpu} environments")
     s_time = time.time()
-    params["scale_rwd"] = True
     env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
     print(f"Finishing making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
     s_time = time.time()
@@ -277,18 +252,19 @@ def run_n_qlearn(n_cpu, params):
     def get_action(obs):
         return model.predict(obs, deterministic=True)[0]
 
+    # Setup logging file and modify parameters for testing
     fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
-    fname_base += f"_train_len={params['train_len']}_norm_obs={params['norm_obs']}"
-    fname_base += f"_more_data={params['more_data']}"
+    fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
     fname = os.path.join("logs", fname_base)
     params["fname"] = fname
 
     params["start_index"] = params["end_index"]
     params["end_index"] = 4*24*90
     n_steps = params["end_index"] - params["start_index"]
-    params["scale_rwd"] = False
+    params["norm_rwd"] = False
+    params["daily_cost"] = 0
     env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    return n_validate(env, n_steps, params, get_action, obs_scale, obs_shift)
+    return n_validate(env, n_steps, params, get_action)
 
 def run_bangbang_offline(params):
     (buy_price, sell_price) = (54.11, 114) # computed by Genetic algorithm offline
@@ -310,7 +286,7 @@ def run_bangbang_offline(params):
 
 def run_bangbang_online(params):
     """ Use genetic algorithm to evaluate best cut-offs """
-    nhistory = 10
+    nhistory = 16
     data = "real"
     start_index = 76*4*24,
     end_index = -1
@@ -357,7 +333,7 @@ def run_bangbang_online(params):
     lbs, ubs = [-25, 0], [100, 200]
     x = genetic.optimize(objective, lbs, ubs, n_iter=100, n_pop=50, seed=None)
 
-def get_wandb_tuning_sweep_id():
+def get_wandb_tuning_sweep_id(env_mode, daily_cost):
     sweep_config = {
         "method": "random",
     }
@@ -373,7 +349,7 @@ def get_wandb_tuning_sweep_id():
             'values': ['MlpPolicy'],
         },
         'train_freq': {
-            'values': [4, (5, "step"), (2, "episode")],
+            'values': [4, (1, "episode")],
         },
         'exploration_fraction': {  # a flat distribution between 0 and 0.1
             'distribution': 'uniform',
@@ -415,23 +391,102 @@ def get_wandb_tuning_sweep_id():
     }
     sweep_config['parameters'] = parameters_dict
 
-    sweep_id = wandb.sweep(sweep_config, project="battery-trading-rl-attempt2")
+    sweep_id = wandb.sweep(sweep_config, project=f"battery-trading-rl-mode={env_mode}-daily_cost={daily_cost}")
 
     return sweep_id
 
-def wandb_run(config=None):
+def wandb_run_difference_daily(config=None):
 
     # Initialize a new wandb run
     with wandb.init(config=config):
         config = wandb.config
         params = dict(config)
-        params["env_mode"] = "delay"
         params["train_len"] = 100000
-        params["more_data"] = True
+        params["norm_rwd"] = True
         params["norm_obs"] = True
+        params["env_mode"] = "difference"
+        params["daily_cost"] = 100
 
         n_cpu = 1
-        n_trials = 10
+        n_trials = 5
+        final_rewards_arr = np.zeros(n_trials, dtype=float)
+
+        for i in range(n_trials):
+            params["seed"] = i
+            final_reward = run_n_qlearn(n_cpu, params)
+            final_rewards_arr[i] = np.median(final_reward)
+
+        wandb.log({
+            "median_reward": np.median(final_rewards_arr), 
+            "all_rewards": final_rewards_arr,
+        })    
+
+def wandb_run_sigmoid_daily(config=None):
+
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        config = wandb.config
+        params = dict(config)
+        params["train_len"] = 100000
+        params["norm_rwd"] = True
+        params["norm_obs"] = False
+        params["env_mode"] = "sigmoid"
+        params["daily_cost"] = 100
+
+        n_cpu = 1
+        n_trials = 5
+        final_rewards_arr = np.zeros(n_trials, dtype=float)
+
+        for i in range(n_trials):
+            params["seed"] = i
+            final_reward = run_n_qlearn(n_cpu, params)
+            final_rewards_arr[i] = np.median(final_reward)
+
+        wandb.log({
+            "median_reward": np.median(final_rewards_arr), 
+            "all_rewards": final_rewards_arr,
+        })    
+
+def wandb_run_sigmoid_free(config=None):
+
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        config = wandb.config
+        params = dict(config)
+        params["train_len"] = 100000
+        params["norm_rwd"] = True
+        params["norm_obs"] = False
+        params["env_mode"] = "sigmoid"
+        params["daily_cost"] = 0
+
+        n_cpu = 1
+        n_trials = 5
+        final_rewards_arr = np.zeros(n_trials, dtype=float)
+
+        for i in range(n_trials):
+            params["seed"] = i
+            final_reward = run_n_qlearn(n_cpu, params)
+            final_rewards_arr[i] = np.median(final_reward)
+
+        wandb.log({
+            "median_reward": np.median(final_rewards_arr), 
+            "all_rewards": final_rewards_arr,
+        })    
+
+def wandb_run_default_daily(config=None):
+
+    # Initialize a new wandb run
+    with wandb.init(config=config):
+        config = wandb.config
+        params = dict(config)
+        params["train_len"] = 100000
+        params["norm_rwd"] = True
+        params["norm_obs"] = True
+        params["env_mode"] = "default"
+        params["daily_cost"] = 100
+
+        n_cpu = 1
+        n_trials = 3
         final_rewards_arr = np.zeros(n_trials, dtype=float)
 
         for i in range(n_trials):
@@ -447,13 +502,15 @@ def wandb_run(config=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
-    parser.add_argument("--env_mode", type=str, default="delay", choices=["delay", "qlearn", "penalize_full", "penalize_wait"], help="Environment type")
+    parser.add_argument("--env_mode", type=str, default="default", choices=["default", "difference", "sigmoid"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
-    parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
     parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
 
+    parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
+    parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
+    parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
     params = vars(parser.parse_args())
 
     params["policy_type"] = "MlpPolicy"
@@ -468,9 +525,16 @@ if __name__ == "__main__":
         params["seed"] = None
     
     if params["wandb_tune"]:
-        n_runs = 64 
-        sweep_id = get_wandb_tuning_sweep_id()
-        wandb.agent(sweep_id, wandb_run, count=n_runs)
+        n_runs = 2
+        sweep_id = get_wandb_tuning_sweep_id(params["env_mode"], params["daily_cost"])
+        if params["env_mode"] == "difference":
+            wandb.agent(sweep_id, wandb_run_difference_daily, count=n_runs)
+        elif params["env_mode"] == "sigmoid" and params["daily_cost"] > 0:
+            wandb.agent(sweep_id, wandb_run_sigmoid_daily, count=n_runs)
+        elif params["env_mode"] == "sigmoid":
+            wandb.agent(sweep_id, wandb_run_sigmoid_free, count=n_runs)
+        else:
+            wandb.agent(sweep_id, wandb_run_default_daily, count=n_runs)
     else:
         n_cpu = 1
         run_n_qlearn(1, params)
