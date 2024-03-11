@@ -56,7 +56,7 @@ class TimelimitCallback(BaseCallback):
         :return: If the callback returns False, training is aborted early.
         """
         run_time = time.time() - self.s_time
-        return run_time <= 1000
+        return run_time <= 2000
 
     def _on_rollout_end(self) -> None:
         """

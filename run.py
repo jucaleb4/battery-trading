@@ -5,7 +5,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if True:
+if False:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -19,6 +19,8 @@ import gymnasium as gym
 import gym_examples
 from gymnasium.wrappers import NormalizeObservation
 from gymnasium.wrappers import NormalizeReward
+from stable_baselines3.common.callbacks import EvalCallback
+from stable_baselines3.common.callbacks import StopTrainingOnRewardThreshold
 
 import wandb
 
@@ -246,15 +248,11 @@ def run_n_qlearn(n_cpu, params):
         target_update_interval=params["target_update_interval"],
     )
     timelimit_check = TimelimitCallback()
-    model.learn(total_timesteps=params["train_len"], log_interval=1, callback=timelimit_check)
-    print(f"Finished training (time={time.time()-s_time:.2f}s)")
-
-    def get_action(obs):
-        return model.predict(obs, deterministic=True)[0]
 
     # Setup logging file and modify parameters for testing
     fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
     fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
+    fname_base += f"_daily_cost={params['daily_cost']}"
     fname = os.path.join("logs", fname_base)
     params["fname"] = fname
 
@@ -263,8 +261,25 @@ def run_n_qlearn(n_cpu, params):
     n_steps = params["end_index"] - params["start_index"]
     params["norm_rwd"] = False
     params["daily_cost"] = 0
-    env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    return n_validate(env, n_steps, params, get_action)
+    eval_env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
+    callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=300_000, verbose=1)
+    eval_callback = EvalCallback(
+        eval_env, 
+        log_path = "logs",
+        n_eval_episodes=10,
+        eval_freq=7296,
+        callback_on_new_best=callback_on_best,
+    )
+
+    # model.learn(total_timesteps=params["train_len"], log_interval=1, callback=timelimit_check)
+    model.learn(total_timesteps=params["train_len"], log_interval=1, callback=eval_callback)
+    print(f"Finished training (time={time.time()-s_time:.2f}s)")
+
+    # validation
+    def get_action(obs):
+        return model.predict(obs, deterministic=True)[0]
+
+    return n_validate(eval_env, n_steps, params, get_action)
 
 def run_bangbang_offline(params):
     (buy_price, sell_price) = (54.11, 114) # computed by Genetic algorithm offline
@@ -408,7 +423,7 @@ def wandb_run_difference_daily(config=None):
         params["daily_cost"] = 100
 
         n_cpu = 1
-        n_trials = 5
+        n_trials = 3
         final_rewards_arr = np.zeros(n_trials, dtype=float)
 
         for i in range(n_trials):
@@ -434,7 +449,7 @@ def wandb_run_sigmoid_daily(config=None):
         params["daily_cost"] = 100
 
         n_cpu = 1
-        n_trials = 5
+        n_trials = 3
         final_rewards_arr = np.zeros(n_trials, dtype=float)
 
         for i in range(n_trials):
@@ -460,7 +475,7 @@ def wandb_run_sigmoid_free(config=None):
         params["daily_cost"] = 0
 
         n_cpu = 1
-        n_trials = 5
+        n_trials = 3
         final_rewards_arr = np.zeros(n_trials, dtype=float)
 
         for i in range(n_trials):
@@ -511,21 +526,24 @@ if __name__ == "__main__":
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
+
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
+    parser.add_argument("--exploration_fraction", type=float, default=0.99, help="Exploration")
     params = vars(parser.parse_args())
 
     params["policy_type"] = "MlpPolicy"
-    params["exploration_fraction"] = 0.99
-    params["learning_starts"] = 100
-    params["gradient_steps"] = -1
-    params["batch_size"] = 32
-    params["learning_rate"] = 0.001
-    params["target_update_interval"] = 100
+    params["learning_starts"] = 20
+    params["batch_size"] = 48
+    params["target_update_interval"] = 540
+    params["max_grad_norm"] = 10
+
 
     if params["seed"] < 0:
         params["seed"] = None
     
     if params["wandb_tune"]:
-        n_runs = 2
+        n_runs = 64
         sweep_id = get_wandb_tuning_sweep_id(params["env_mode"], params["daily_cost"])
         if params["env_mode"] == "difference":
             wandb.agent(sweep_id, wandb_run_difference_daily, count=n_runs)
