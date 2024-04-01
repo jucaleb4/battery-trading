@@ -139,7 +139,6 @@ def run_n_qlearn(n_cpu, params):
     train_horizon = 76*4*24
 
     def make_env(rank: int, params={}, seed: int=0):
-
         def _init() -> gym.Env:
             env = gym.make(
                 "gym_examples/BatteryEnv-v0", 
@@ -151,7 +150,8 @@ def run_n_qlearn(n_cpu, params):
                 mode=params["env_mode"], 
                 daily_cost=params["daily_cost"],
                 more_data=True,
-                delay_cost=True,
+                delay_cost=params.get("delay_cost", True),
+                solar_coloc=params.get("solar_coloc", False)
             )
             env.reset(seed=seed+rank)
             if params.get("norm_obs", False):
@@ -191,6 +191,7 @@ def run_n_qlearn(n_cpu, params):
     # Setup logging file and modify parameters for testing
     fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
     fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
+    fname_base += f"_solar={params['solar_coloc']}"
     fname = os.path.join("logs", fname_base)
     params["fname"] = fname
 
@@ -200,6 +201,7 @@ def run_n_qlearn(n_cpu, params):
     n_steps = eval_params["end_index"] - eval_params["start_index"]
     eval_params["norm_rwd"] = False
     eval_params["daily_cost"] = 0
+    eval_params["delay_cost"] = False
     eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
     eval_callback = EvalCallback(eval_env, best_model_save_path='models',
                              log_path='logs', n_eval_episodes=10,
@@ -239,6 +241,7 @@ if __name__ == "__main__":
     parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
+    parser.add_argument("--solar_coloc", action="store_true", help="Use solar colocation")
     parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
 
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
