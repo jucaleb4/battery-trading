@@ -13,11 +13,13 @@ import gym_examples
 
 def bang_bang_offline_training():
     """ Use genetic algorithm to evaluate best cut-offs """
+    print("Genetic algorithm does minimization, so we want to the smallest one")
+
     nhistory = 10
     data = "real"
     start_index = 0
-    end_index = -1
-    env_mode = "delay"
+    end_index = 76*4*24 # -1
+    env_mode = "delay" # "delay"
 
     # collect all the prices
     env = gym.make(
@@ -28,6 +30,7 @@ def bang_bang_offline_training():
         start_index = start_index,
         end_index = end_index,
         max_episode_steps=76*4*24, # can change length here!"
+        solar_coloc=True,
     )
     env.reset()
 
@@ -59,9 +62,6 @@ def bang_bang_offline_training():
 
     lbs, ubs = [-25, 0], [100, 200]
     x = genetic.optimize(objective, lbs, ubs, n_iter=100, n_pop=50, seed=None)
-
-class OnlineBangBang():
-    def __init__(
 
 if __name__ == "__main__":
     bang_bang_offline_training()
