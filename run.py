@@ -5,7 +5,7 @@ import multiprocessing as mp
 import numpy as np
 
 # just for perlmutter
-if False:
+if True:
     import sys
     sys.path.append("/global/homes/c/cju33/.conda/envs/venv/lib/python3.12/site-packages")
     sys.path.append("/global/homes/c/cju33/gym-examples")
@@ -104,7 +104,7 @@ def n_validate(env, n_steps, params, get_action):
 
         if len(params.get('fname', '')) > 0:
             for i in range(n_cpu):
-                fname = f"{params['fname']}_seed={i}.csv"
+                fname = f"{params['fname']}_seed={params['seed']+i}.csv"
                 logger = SimpleLogger(fname, params["env_mode"])
                 for t in range(n_steps):
                     logger.store((obs[i], action_arr[t,i], total_reward_arr[t,i]))
@@ -192,17 +192,17 @@ def run_n_qlearn(n_cpu, params):
     # Setup logging file and modify parameters for testing
     fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
     fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
-    fname_base += f"_daily_cost={params['daily_cost']}"
     fname = os.path.join("logs", fname_base)
     params["fname"] = fname
 
-    params["start_index"] = params["end_index"]
-    params["end_index"] = 4*24*90
-    n_steps = params["end_index"] - params["start_index"]
-    params["norm_rwd"] = False
-    params["daily_cost"] = 0
-    eval_env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=300_000, verbose=1)
+    eval_params = params.copy()
+    eval_params["start_index"] = eval_params["end_index"]
+    eval_params["end_index"] = 4*24*90
+    n_steps = eval_params["end_index"] - eval_params["start_index"]
+    eval_params["norm_rwd"] = False
+    eval_params["daily_cost"] = 0
+    eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
+    callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=200_000, verbose=1)
     eval_callback = EvalCallback(
         eval_env, 
         log_path = "logs",
@@ -227,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--env_mode", type=str, default="default", choices=["default", "difference", "sigmoid"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
+    parser.add_argument("--n_trials", type=int, default=1, help="Number of seeds to run")
     parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
 
     parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
@@ -252,5 +253,8 @@ if __name__ == "__main__":
         tune.run_wandb(params)
     else:
         n_cpu = 1
-        run_n_qlearn(1, params)
+        seed_0 = params["seed"] if params["seed"] != None else 0
+        for s in range(seed_0, seed_0+ params["n_trials"]):
+            params["seed"] = s
+            run_n_qlearn(1, params)
         # run_bangbang_offline(params)
