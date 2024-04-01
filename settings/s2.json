@@ -1,0 +1,19 @@
+{
+  "train_len": 200000,
+  "norm_obs": true,
+  "norm_rwd": true,
+  "daily_cost": true,
+  "learning_rate": 0.000918,
+  "gradient_steps": -1,
+  "exploration_fraction": 0.9685,
+  "n_trials": 10,
+  "seed": 0,
+  "policy_type": "MlpPolicy",
+  "learning_starts": 20,
+  "batch_size": 48,
+  "target_update_interval": 540,
+  "max_grad_norm": 10,
+  "more_data": true,
+  "env_mode": "default",
+  "solar_coloc": true
+}

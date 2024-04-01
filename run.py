@@ -1,6 +1,7 @@
 import os
 import time
 import multiprocessing as mp
+import json
 
 import numpy as np
 
@@ -189,9 +190,13 @@ def run_n_qlearn(n_cpu, params):
     timelimit_check = TimelimitCallback()
 
     # Setup logging file and modify parameters for testing
-    fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
-    fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
-    fname_base += f"_solar={params['solar_coloc']}"
+    if len(params.get("settings_file", "")) > 5:
+        settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
+        fname_base = f"alg=dqn_data=real_settings={settings_fname_raw}"
+    else:
+        fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
+        fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
+        fname_base += f"_solar={params['solar_coloc']}"
     fname = os.path.join("logs", fname_base)
     params["fname"] = fname
 
@@ -247,6 +252,8 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
     parser.add_argument("--exploration_fraction", type=float, default=0.99, help="Exploration")
+
+    parser.add_argument("--settings_file", type=str, default="")
     params = vars(parser.parse_args())
 
     params["policy_type"] = "MlpPolicy"
@@ -254,10 +261,14 @@ if __name__ == "__main__":
     params["batch_size"] = 48
     params["target_update_interval"] = 540
     params["max_grad_norm"] = 10
-
     if params["seed"] < 0:
         params["seed"] = None
-    
+
+    if len(params["settings_file"]) > 5 and params["settings_file"][-4:] == "json":
+        with open(params["settings_file"], "r") as fp:
+            new_settings = json.load(fp)
+        params.update(new_settings)
+
     if params["wandb_tune"]:
         tune.run_wandb(params)
     else:
