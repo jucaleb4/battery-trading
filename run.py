@@ -22,7 +22,6 @@ from gymnasium.wrappers import NormalizeReward
 from stable_baselines3.common.callbacks import EvalCallback
 from stable_baselines3.common.callbacks import StopTrainingOnRewardThreshold
 
-
 import warnings
 import functools
 
@@ -202,18 +201,25 @@ def run_n_qlearn(n_cpu, params):
     eval_params["norm_rwd"] = False
     eval_params["daily_cost"] = 0
     eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
-    callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=200_000, verbose=1)
-    eval_callback = EvalCallback(
-        eval_env, 
-        log_path = "logs",
-        n_eval_episodes=10,
-        eval_freq=7296,
-        callback_on_new_best=callback_on_best,
-    )
+    eval_callback = EvalCallback(eval_env, best_model_save_path='models',
+                             log_path='logs', n_eval_episodes=10,
+                             deterministic=True )
+    # callback_on_best = StopTrainingOnRewardThreshold(reward_threshold=200_000, verbose=1)
+    # eval_callback = EvalCallback(
+    #     eval_env, 
+    #     log_path = "logs",
+    #     n_eval_episodes=10,
+    #     eval_freq=7296,
+    #     callback_on_new_best=callback_on_best,
+    # )
 
     # model.learn(total_timesteps=params["train_len"], log_interval=1, callback=timelimit_check)
     model.learn(total_timesteps=params["train_len"], log_interval=1, callback=eval_callback)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
+
+    print("Importing best model")
+    model = DQN.load("models/best_model.zip")
+    print("Finishing importing best model")
 
     # validation
     def get_action(obs):
