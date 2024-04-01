@@ -24,7 +24,7 @@ def run_bangbang_offline(params):
             a = null
         return a
 
-    fname = os.path.join("logs", f"alg=bang_offline_data=real.csv")
+    fname = os.path.join("logs", f"alg=bang_offline_data=read_solar={params['solar_coloc']}.csv")
     params["fname"] = fname
     validate(get_action, params)
 
@@ -32,8 +32,8 @@ def run_bangbang_online(params):
     """ Use genetic algorithm to evaluate best cut-offs """
     nhistory = 16
     data = "real"
-    start_index = 76*4*24,
-    end_index = -1
+    start_index = 0 # 76*4*24,
+    end_index = 76*4*24 # -1
     env_mode = "delay"
 
     # collect all the prices
@@ -42,7 +42,7 @@ def run_bangbang_online(params):
         nhistory=nhistory, 
         data=data, 
         mode=env_mode, 
-        max_episode_steps=14*4*24, # can change length here!"
+        max_episode_steps= 76*4*24, # 14*4*24, # can change length here!"
     )
     env.reset()
 
@@ -86,6 +86,8 @@ def bang_bang_offline_training():
     start_index = 0
     end_index = 76*4*24 # -1
     env_mode = "delay" # "delay"
+    solar_coloc=False
+    print(f"Training with solar colocation: {solar_coloc}")
 
     # collect all the prices
     env = gym.make(
@@ -96,7 +98,7 @@ def bang_bang_offline_training():
         start_index = start_index,
         end_index = end_index,
         max_episode_steps=76*4*24, # can change length here!"
-        solar_coloc=True,
+        solar_coloc=solar_coloc,
     )
     env.reset()
 
@@ -130,9 +132,12 @@ def bang_bang_offline_training():
     x = genetic.optimize(objective, lbs, ubs, n_iter=100, n_pop=50, seed=None)
 
 if __name__ == "__main__":
-    # bang_bang_offline_training()
-    params = {
-        "genetic_prices": (51.17, 82),
-        "solar_coloc": False
-    }   
-    run_bangbang_offline(params)
+    if input("train? (otherwise test): ").lower() in ["yes", "y"]:
+        bang_bang_offline_training()
+    else:
+        params = {
+            # "genetic_prices": (51.17, 82), 
+            "genetic_prices": (50, 89), 
+            "solar_coloc": False
+        }   
+        run_bangbang_offline(params)
