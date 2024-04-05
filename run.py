@@ -13,6 +13,7 @@ if True:
 
 import argparse
 
+from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 import gymnasium as gym
@@ -55,11 +56,9 @@ def validate(env, n_steps, params, get_action):
     info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp"]
     assert set(info_keys) <= set(all_info_keys)
 
-    params["fname"] = "logs/caleb.json"
-    log_mode = len(params.get('fname', '')) > 5
-    if log_mode:
-        fname = f"{params['fname']}_seed={params['seed']}.csv"
-        logger = SimpleLogger(fname, info_keys)
+    assert len(params.get('fname', '')) > 5
+    fname = f"{params['fname']}_seed={params['seed']}.csv"
+    logger = SimpleLogger(fname, info_keys)
 
     try:
         obs, info = env.reset()
@@ -69,14 +68,11 @@ def validate(env, n_steps, params, get_action):
             (obs, reward, terminated, truncated, info) = env.step(action)
             done = terminated or truncated
             total_reward += reward
-            if log_mode:
-                logger.store((info, action, total_reward))
+            logger.store((info, action, total_reward))
             if done:
                 obs, info = env.reset()
 
-        if log_mode:
-            import ipdb; ipdb.set_trace()
-            logger.save()
+        logger.save()
 
         print(f"Final reward: {total_reward}")
 
@@ -122,8 +118,9 @@ def run_n_qlearn(n_cpu, params):
                 solar_coloc=params.get("solar_coloc", False),
                 solar_scale=params.get("solar_scale", 0.0),
             )
+            obs, info = env.reset()
             env = FlattenObservation(env)
-            env.reset(seed=seed+rank)
+            obs, info = env.reset(seed=seed+rank)
             if params.get("norm_obs", False):
                 env = NormalizeObservation(env)
             if params.get("norm_rwd", False):
@@ -131,23 +128,19 @@ def run_n_qlearn(n_cpu, params):
             if params.get("norm_obs", False) or params.get("norm_rwd", False):
                 for _ in range(1000):
                     env.step(env.action_space.sample())
-            env.reset(seed=seed+rank)
+            obs, info = env.reset(seed=seed+rank)
             return env
 
         set_random_seed(seed)
         return _init
 
-    print(f"Making {n_cpu} environments")
+    print(f"Making environments")
     s_time = time.time()
     env = make_env(0, params)()
     test_env = make_env(1000, params)()
-    # env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    # test_env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    print(f"Finishing making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
+    setup_time = time.time()-s_time
+    print(f"Setup time (time={setup_time:.2f}s)\nStarting training")
     s_time = time.time()
-
-    validate(env, 100, params, lambda obs : env.action_space.sample())
-    import ipdb; ipdb.set_trace()
 
     # train
     model = DQN(
@@ -168,18 +161,19 @@ def run_n_qlearn(n_cpu, params):
     eval_callback = EvalCallback(test_env, best_model_save_path='models',
                                 log_path='logs', 
                                 n_eval_episodes=3,
-                                eval_freq=1000,
+                                eval_freq=7296,
                                 deterministic=True )
     model.learn(total_timesteps=params["train_len"], log_interval=1, callback=eval_callback)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     print("Importing best model")
-    model = DQN.load("models/best_model.zip")
+    model = DQN.load("models/best_model")
     print("Finishing importing best model")
 
     # validation
     def get_action(obs):
-        return model.predict(obs, deterministic=True)
+        # returns (action (as array), state)
+        return model.predict(obs, deterministic=True)[0].flat[0]
 
     # Setup logging file and modify parameters for testing
     setting_names = ["a", "b", "c"]
@@ -193,22 +187,19 @@ def run_n_qlearn(n_cpu, params):
     eval_params["delay_cost"] = False
 
     for setting_name, solar_scale in zip(setting_names, solar_scales):
-        print(f"Eval {setting_name} with solar_scale: {solar_scale}")
+        print(f"Eval setting {setting_name} with solar_scale: {solar_scale}")
         if len(params.get("settings_file", "")) > 5:
             settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
             fname_base = f"alg=dqn_data=real_settings={settings_fname_raw}_out={setting_name}"
         else:
-            fname_base = f"alg=dqn_data=real_env_mode={params['env_mode']}"
-            fname_base += f"_train_len={params['train_len']}_daily_cost={params['daily_cost']}"
-            fname_base += f"_solar={params['solar_coloc']}_out={setting_name}"
+            raise Exception("You need to input a valid settings file")
         fname = os.path.join("logs", fname_base)
-        params["fname"] = fname
-        params["solar_scale"] = solar_scale
+        eval_params["fname"] = fname
+        eval_params["solar_scale"] = solar_scale
 
-        # eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
         eval_env = make_env(0, eval_params)()
 
-        validate(eval_env, n_steps, params, get_action)
+        validate(eval_env, n_steps, eval_params, get_action)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

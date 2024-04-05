@@ -1,5 +1,5 @@
 {
-  "train_len": 2000,
+  "train_len": 200000,
   "norm_obs": true,
   "norm_rwd": true,
   "learning_rate": 0.000918,
