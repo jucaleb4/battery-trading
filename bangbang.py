@@ -136,8 +136,9 @@ if __name__ == "__main__":
         bang_bang_offline_training()
     else:
         params = {
-            # "genetic_prices": (51.17, 82), 
-            "genetic_prices": (50, 89), 
+            "genetic_prices": (51.17, 82), # no solar
+            # "genetic_prices": (50, 89),  # with solar
+            # "genetic_prices": (48, 100.23), 
             "solar_coloc": False
         }   
         run_bangbang_offline(params)

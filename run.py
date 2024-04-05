@@ -13,7 +13,6 @@ if True:
 
 import argparse
 
-from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 import gymnasium as gym
@@ -28,6 +27,7 @@ import warnings
 import functools
 
 from utils import TimelimitCallback
+from utils import SimpleLogger
 
 import tune
 # import bangbang
@@ -46,79 +46,41 @@ def deprecated(func):
         return func(*args, **kwargs)
     return new_func
 
-class SimpleLogger():
-    def __init__(self, fname, mode):
-        """ Saves data for: (soc, lmp, action, total_rwd) """
-        self.fname = fname
-        self.mode = mode
-        self.data_arr = np.zeros((128, 4), dtype=float)
-        self.ct = 0
-
-    def store(self, data):
-        """ Stores data
-        :param data: tuple given as (obs, action, total_rwd)
-        """
-        (obs, a , total_rwd) = data
-
-        (soc, lmp) = obs[0], obs[1]
-        if self.mode == "qlearn":
-            (soc, lmp) = (0,0)
-        self.data_arr[self.ct] = (soc, lmp, a, total_rwd)
-        self.ct += 1
-
-        if self.ct == len(self.data_arr):
-            self.data_arr = np.vstack((self.data_arr, np.zeros(self.data_arr.shape)))
-
-    def save(self):
-        fmt="%1.2f,%1.2f,%i,%1.2e"
-        with open(self.fname, "wb") as fp:
-            fp.write(b"soc,lmp,a,total_rwd\n")
-            np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
-        print(f"Saved testing logs to {self.fname}")
-
-def n_validate(env, n_steps, params, get_action):
+def validate(env, n_steps, params, get_action):
     """ Test/validates policy.
     :param get_action: general function that takes in a current observation and outputs an action
     """
-    obs = env.reset()
-    (_, _, _, info) = env.step(action)
-    n_cpu = obs.shape[0] if len(obs.shape) > 1 else 1
-    action = get_action(obs)
-    import ipdb; ipdb.set_trace()
-    if len(action.shape) > 1:
-        action_arr = np.zeros((n_steps, n_cpu, action.shape[1]))
-        info_arr = np.zeros((n_steps, n_cpu, info.shape[1:]))
-    else:
-        action_arr = np.zeros((n_steps, n_cpu))
-        info_arr = np.zeros((n_steps, n_cpu, info.shape[1:]))
-    total_reward_arr = np.zeros((n_steps, n_cpu))
+    obs, info = env.reset()
+    all_info_keys = list(info.keys())
+    info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp"]
+    assert set(info_keys) <= set(all_info_keys)
+
+    params["fname"] = "logs/caleb.json"
+    log_mode = len(params.get('fname', '')) > 5
+    if log_mode:
+        fname = f"{params['fname']}_seed={params['seed']}.csv"
+        logger = SimpleLogger(fname, info_keys)
 
     try:
-        obs = env.reset()
-        total_reward = np.zeros(n_cpu, dtype=float)
+        obs, info = env.reset()
+        total_reward = 0
         for t in range(n_steps):
             action = get_action(obs)
-            # print(f"run.py [{t}]: ", action)
-            (obs, reward, terminated, info) = env.step(action)
-            # TODO: hacky, need more automatied way to do this
+            (obs, reward, terminated, truncated, info) = env.step(action)
+            done = terminated or truncated
             total_reward += reward
-            action_arr[t] = action
-            total_reward_arr[t] = total_reward
-            if np.any(terminated):
-                obs = env.reset()
+            if log_mode:
+                logger.store((info, action, total_reward))
+            if done:
+                obs, info = env.reset()
 
-        if len(params.get('fname', '')) > 0:
-            for i in range(n_cpu):
-                fname = f"{params['fname']}_seed={params['seed']+i}.csv"
-                logger = SimpleLogger(fname, params["env_mode"])
-                for t in range(n_steps):
-                    logger.store((obs[i], action_arr[t,i], total_reward_arr[t,i], info))
-                logger.save()
+        if log_mode:
+            import ipdb; ipdb.set_trace()
+            logger.save()
 
-        final_rewards = total_reward_arr[-1,:]
-        print(f"All final rewards: {final_rewards}")
+        print(f"Final reward: {total_reward}")
 
-        return final_rewards
+        return total_reward
 
     except KeyboardInterrupt:
         logger.save()
@@ -177,11 +139,15 @@ def run_n_qlearn(n_cpu, params):
 
     print(f"Making {n_cpu} environments")
     s_time = time.time()
-    # env = make_env(0, params)()
-    env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
-    test_env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
+    env = make_env(0, params)()
+    test_env = make_env(1000, params)()
+    # env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
+    # test_env = SubprocVecEnv([make_env(i, params) for i in range(n_cpu)])
     print(f"Finishing making {n_cpu} environments (time={time.time()-s_time:.2f}s)\nStarting training")
     s_time = time.time()
+
+    validate(env, 100, params, lambda obs : env.action_space.sample())
+    import ipdb; ipdb.set_trace()
 
     # train
     model = DQN(
@@ -213,7 +179,7 @@ def run_n_qlearn(n_cpu, params):
 
     # validation
     def get_action(obs):
-        return model.predict(obs, deterministic=True)[0]
+        return model.predict(obs, deterministic=True)
 
     # Setup logging file and modify parameters for testing
     setting_names = ["a", "b", "c"]
@@ -239,9 +205,10 @@ def run_n_qlearn(n_cpu, params):
         params["fname"] = fname
         params["solar_scale"] = solar_scale
 
-        eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
+        # eval_env = SubprocVecEnv([make_env(i, eval_params) for i in range(n_cpu)])
+        eval_env = make_env(0, eval_params)()
 
-        n_validate(eval_env, n_steps, params, get_action)
+        validate(eval_env, n_steps, params, get_action)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

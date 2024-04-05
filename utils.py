@@ -69,3 +69,32 @@ class TimelimitCallback(BaseCallback):
         This event is triggered before exiting the `learn()` method.
         """
         pass
+
+class SimpleLogger():
+    def __init__(self, fname, info_keys):
+        """ Saves data for: (soc, lmp, action, total_rwd) """
+        self.fname = fname
+        # store info_keys, action, and total_rwd
+        self.info_keys = info_keys
+        self.data_arr = np.zeros((128, len(info_keys) + 2), dtype=float)
+        self.ct = 0
+
+    def store(self, data):
+        """ Stores data
+        :param data: tuple given as (obs, action, total_rwd)
+        """
+        (info, a, total_rwd) = data
+
+        self.data_arr[self.ct] = tuple([info[k] for k in self.info_keys]) +  (a, total_rwd)
+        self.ct += 1
+
+        if self.ct == len(self.data_arr):
+            self.data_arr = np.vstack((self.data_arr, np.zeros(self.data_arr.shape)))
+
+    def save(self):
+        fmt="%1.2f,"*len(self.info_keys) + "%i,%1.2e"
+        with open(self.fname, "wb") as fp:
+            fp.write(("%s,a,total_rwd\n" % ",".join(self.info_keys)).encode())
+            np.savetxt(fp, self.data_arr[:self.ct], fmt=fmt)
+        print(f"Saved testing logs to {self.fname}")
+
