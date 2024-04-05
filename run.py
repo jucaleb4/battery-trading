@@ -134,6 +134,7 @@ def run_n_qlearn(n_cpu, params):
         set_random_seed(seed)
         return _init
 
+    # Setup logging file and modify parameters for testing
     print(f"Making environments")
     s_time = time.time()
     env = make_env(0, params)()
@@ -175,9 +176,6 @@ def run_n_qlearn(n_cpu, params):
         # returns (action (as array), state)
         return model.predict(obs, deterministic=True)[0].flat[0]
 
-    # Setup logging file and modify parameters for testing
-    setting_names = ["a", "b", "c"]
-    solar_scales = [0.25, 0.5, 1.0]
     eval_params = params.copy()
     eval_params["start_index"] = eval_params["end_index"]
     eval_params["end_index"] = 4*24*90
@@ -186,20 +184,17 @@ def run_n_qlearn(n_cpu, params):
     eval_params["daily_cost"] = 0
     eval_params["delay_cost"] = False
 
-    for setting_name, solar_scale in zip(setting_names, solar_scales):
-        print(f"Eval setting {setting_name} with solar_scale: {solar_scale}")
-        if len(params.get("settings_file", "")) > 5:
-            settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
-            fname_base = f"alg=dqn_data=real_settings={settings_fname_raw}_out={setting_name}"
-        else:
-            raise Exception("You need to input a valid settings file")
-        fname = os.path.join("logs", fname_base)
-        eval_params["fname"] = fname
-        eval_params["solar_scale"] = solar_scale
+    if len(params.get("settings_file", "")) > 5:
+        settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
+        fname_base = f"alg=dqn_data=real_settings={settings_fname_raw}"
+    else:
+        raise Exception("You need to input a valid settings file")
+    fname = os.path.join("logs", fname_base)
+    eval_params["fname"] = fname
 
-        eval_env = make_env(0, eval_params)()
+    eval_env = make_env(0, eval_params)()
 
-        validate(eval_env, n_steps, eval_params, get_action)
+    validate(eval_env, n_steps, eval_params, get_action)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -214,6 +209,7 @@ if __name__ == "__main__":
     parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--solar_coloc", action="store_true", help="Use solar colocation")
+    parser.add_argument("--solar_scale", type=float, default=0., help="Solar scaling")
     parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
 
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
