@@ -12,7 +12,7 @@
   "batch_size": 48,
   "target_update_interval": 540,
   "max_grad_norm": 10,
-  "daily_cost": 0.0,
+  "daily_cost": 106.10,
   "more_data": true,
   "env_mode": "default",
   "solar_coloc": true,
