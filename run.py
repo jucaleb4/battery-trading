@@ -196,7 +196,7 @@ def run_n_qlearn(n_cpu, params):
         def _init() -> gym.Env:
             env = gym.make(
                 "gym_examples/BatteryEnv-v0", 
-                seed=params["seed"],
+                seed=eval_params["seed"],
                 nhistory=params["nhistory"], 
                 start_index=params["start_index"],
                 end_index=params["end_index"],
@@ -207,6 +207,7 @@ def run_n_qlearn(n_cpu, params):
                 delay_cost=params.get("delay_cost", True),
                 solar_coloc=params.get("solar_coloc", False),
                 solar_scale=params.get("solar_scale_test", -1),
+            )
     eval_env = make_env(0, eval_params)()
 
     validate(eval_env, n_steps, eval_params, get_action)
@@ -227,6 +228,7 @@ if __name__ == "__main__":
     parser.add_argument("--solar_scale", type=float, default=0., help="Solar scaling")
     parser.add_argument("--solar_scale_test", type=float, default=-1, help="Solar scaling for testing")
     parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
+    parser.add_argument("--delay_cost", action="store_true", help="Delay cost of buying")
 
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
