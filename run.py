@@ -183,6 +183,7 @@ def run_n_qlearn(n_cpu, params):
     eval_params["norm_rwd"] = False
     eval_params["daily_cost"] = 0
     eval_params["delay_cost"] = False
+    eval_params["solar_scale"] = params["solar_scale_test"]
 
     if len(params.get("settings_file", "")) > 5:
         settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
@@ -192,22 +193,6 @@ def run_n_qlearn(n_cpu, params):
     fname = os.path.join("logs", fname_base)
     eval_params["fname"] = fname
 
-    def make_env(rank: int, params={}, seed: int=0):
-        def _init() -> gym.Env:
-            env = gym.make(
-                "gym_examples/BatteryEnv-v0", 
-                seed=eval_params["seed"],
-                nhistory=params["nhistory"], 
-                start_index=params["start_index"],
-                end_index=params["end_index"],
-                max_episode_steps=params["end_index"]-params["start_index"],
-                mode=params["env_mode"], 
-                daily_cost=params["daily_cost"],
-                more_data=params["more_data"],
-                delay_cost=params.get("delay_cost", True),
-                solar_coloc=params.get("solar_coloc", False),
-                solar_scale=params.get("solar_scale_test", -1),
-            )
     eval_env = make_env(0, eval_params)()
 
     validate(eval_env, n_steps, eval_params, get_action)
