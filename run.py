@@ -113,7 +113,7 @@ def run_n_qlearn(n_cpu, params):
                 max_episode_steps=params["end_index"]-params["start_index"],
                 mode=params["env_mode"], 
                 daily_cost=params["daily_cost"],
-                more_data=True,
+                more_data=params["more_data"],
                 delay_cost=params.get("delay_cost", True),
                 solar_coloc=params.get("solar_coloc", False),
                 solar_scale=params.get("solar_scale", 0.0),
@@ -192,6 +192,21 @@ def run_n_qlearn(n_cpu, params):
     fname = os.path.join("logs", fname_base)
     eval_params["fname"] = fname
 
+    def make_env(rank: int, params={}, seed: int=0):
+        def _init() -> gym.Env:
+            env = gym.make(
+                "gym_examples/BatteryEnv-v0", 
+                seed=params["seed"],
+                nhistory=params["nhistory"], 
+                start_index=params["start_index"],
+                end_index=params["end_index"],
+                max_episode_steps=params["end_index"]-params["start_index"],
+                mode=params["env_mode"], 
+                daily_cost=params["daily_cost"],
+                more_data=params["more_data"],
+                delay_cost=params.get("delay_cost", True),
+                solar_coloc=params.get("solar_coloc", False),
+                solar_scale=params.get("solar_scale_test", -1),
     eval_env = make_env(0, eval_params)()
 
     validate(eval_env, n_steps, eval_params, get_action)
@@ -210,6 +225,7 @@ if __name__ == "__main__":
     parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
     parser.add_argument("--solar_coloc", action="store_true", help="Use solar colocation")
     parser.add_argument("--solar_scale", type=float, default=0., help="Solar scaling")
+    parser.add_argument("--solar_scale_test", type=float, default=-1, help="Solar scaling for testing")
     parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
 
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
@@ -224,6 +240,7 @@ if __name__ == "__main__":
     params["batch_size"] = 48
     params["target_update_interval"] = 540
     params["max_grad_norm"] = 10
+    params["solar_scale_test"] = params["solar_scale_test"] if params["solar_scale_test"] >= 0 else params["solar_scale"]
     if params["seed"] < 0:
         params["seed"] = None
 
