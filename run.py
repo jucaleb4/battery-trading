@@ -47,7 +47,23 @@ def deprecated(func):
         return func(*args, **kwargs)
     return new_func
 
-def validate(env, n_steps, params, get_action):
+def process_battery_env(env, seed, norm_obs, norm_rwd):
+    """ 
+    Flattens battery's Dict environment and applys observation and reward
+    normalization as needed. """
+    env = FlattenObservation(env)
+    env.reset(seed=seed)
+    if norm_obs:
+        eval_env = NormalizeObservation(env)
+    if norm_rwd:
+        eval_env = NormalizeReward(env)
+    if norm_obs or norm_rwd:
+        for _ in range(1000):
+            env.step(env.action_space.sample())
+    env.reset(seed=seed)
+    return env
+
+def validate(env, log_file, get_action):
     """ Test/validates policy.
     :param get_action: general function that takes in a current observation and outputs an action
     """
@@ -56,21 +72,19 @@ def validate(env, n_steps, params, get_action):
     info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp"]
     assert set(info_keys) <= set(all_info_keys)
 
-    assert len(params.get('fname', '')) > 5
-    fname = f"{params['fname']}_seed={params['seed']}.csv"
-    logger = SimpleLogger(fname, info_keys)
+    logger = SimpleLogger(log_file, info_keys)
 
     try:
         obs, info = env.reset()
         total_reward = 0
-        for t in range(n_steps):
+        while 1:
             action = get_action(obs)
             (obs, reward, terminated, truncated, info) = env.step(action)
             done = terminated or truncated
             total_reward += reward
             logger.store((info, action, total_reward))
             if done:
-                obs, info = env.reset()
+                break
 
         logger.save()
 
@@ -81,94 +95,123 @@ def validate(env, n_steps, params, get_action):
     except KeyboardInterrupt:
         logger.save()
 
-def run_n_qlearn(n_cpu, params):
+def run_qlearn(
+        seed: int,
+        n_history: int,
+        max_steps: int,
+        env_mode: str,
+        norm_obs: bool,
+        norm_rwd: bool,
+        more_data: bool,
+        daily_cost: float,
+        delay_cost: float,
+        solar_coloc: bool,
+        solar_scale: bool,
+        solar_scale_test: bool,
+        policy_type: str,
+        learning_rate: float,
+        max_grad_norm: float,
+        learning_starts: int,
+        exploration_fraction: float,
+        exploration_final_eps: float,
+        gradient_steps: int,
+        batch_size: int,
+        target_update_interval: int,
+        log_folder: str,
+    ):
     """ Runs multiple DQN experiments
 
-    :param n: number of environments
+    :param seed: 
     """
-    assert "env_mode" in params
-    assert "train_len" in params
-    assert "policy_type" in params
-    assert "exploration_fraction" in params
-    assert "learning_starts" in params
-    assert "batch_size" in params
-    assert "learning_rate" in params
-    assert "target_update_interval" in params
-
-    params["start_index"] = 0 
-    params["end_index"] = 4*24*76
-    params["nhistory"] = 16
-
-    nhistory = 16
-    train_horizon = 76*4*24
-
-    def make_env(rank: int, params={}, seed: int=0):
-        def _init() -> gym.Env:
-            env = gym.make(
-                "gym_examples/BatteryEnv-v0", 
-                seed=params["seed"],
-                nhistory=params["nhistory"], 
-                start_index=params["start_index"],
-                end_index=params["end_index"],
-                max_episode_steps=params["end_index"]-params["start_index"],
-                mode=params["env_mode"], 
-                daily_cost=params["daily_cost"],
-                more_data=params["more_data"],
-                delay_cost=params.get("delay_cost", True),
-                solar_coloc=params.get("solar_coloc", False),
-                solar_scale=params.get("solar_scale", 0.0),
-            )
-            obs, info = env.reset()
-            env = FlattenObservation(env)
-            obs, info = env.reset(seed=seed+rank)
-            if params.get("norm_obs", False):
-                env = NormalizeObservation(env)
-            if params.get("norm_rwd", False):
-                env = NormalizeReward(env)
-            if params.get("norm_obs", False) or params.get("norm_rwd", False):
-                for _ in range(1000):
-                    env.step(env.action_space.sample())
-            obs, info = env.reset(seed=seed+rank)
-            return env
-
-        set_random_seed(seed)
-        return _init
+    start_date = 0
+    end_date = 90-14
+    get_index = lambda x : 4*24*x
 
     # Setup logging file and modify parameters for testing
     print(f"Making environments")
     s_time = time.time()
-    env = make_env(0, params)()
-    test_env = make_env(1000, params)()
+    env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        nhistory=n_history, 
+        start_index=get_index(start_date),
+        end_index=get_index(end_date),
+        max_episode_steps=get_index(end_date)-get_index(start_date),
+        mode=env_mode,
+        daily_cost=daily_cost,
+        more_data=more_data,
+        delay_cost=delay_cost,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        seed=seed,
+    )
+    env = process_battery_env(env, seed, norm_obs, norm_rwd)
+    test_env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        nhistory=n_history, 
+        start_index=get_index(start_date),
+        end_index=get_index(end_date),
+        max_episode_steps=get_index(end_date)-get_index(start_date),
+        mode=env_mode,
+        daily_cost=daily_cost,
+        more_data=more_data,
+        delay_cost=delay_cost,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        seed=1000+seed,
+    )
+    test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
+
+    test_start_date = 90-14
+    test_end_date = 90
+    eval_env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        nhistory=n_history, 
+        start_index=get_index(test_start_date),
+        end_index=get_index(test_end_date),
+        max_episode_steps=get_index(test_end_date)-get_index(test_start_date),
+        mode=env_mode,
+        daily_cost=0,
+        more_data=more_data,
+        delay_cost=False,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale_test,
+        seed=seed,
+    )
+    eval_env = process_battery_env(eval_env, 2000+seed, norm_obs, norm_rwd=False)
+
     setup_time = time.time()-s_time
     print(f"Setup time (time={setup_time:.2f}s)\nStarting training")
-    s_time = time.time()
 
     # train
+    s_time = time.time()
     model = DQN(
-        params["policy_type"], 
-        env, 
+        policy=policy_type, 
+        env=env, 
         verbose=1, 
-        learning_starts=params["learning_starts"],
-        exploration_fraction=params["exploration_fraction"], 
-        exploration_final_eps=0.05,
-        gradient_steps=params["gradient_steps"],
-        batch_size=params["batch_size"],
-        learning_rate=params["learning_rate"],
-        target_update_interval=params["target_update_interval"],
+        seed=seed,
+        learning_starts=learning_starts,
+        exploration_fraction=exploration_fraction, 
+        exploration_final_eps=exploration_final_eps,
+        gradient_steps=gradient_steps,
+        batch_size=batch_size,
+        learning_rate=learning_rate,
+        target_update_interval=target_update_interval,
     )
-    timelimit_check = TimelimitCallback()
-
     # we should validate on the test environment
-    eval_callback = EvalCallback(test_env, best_model_save_path='models',
-                                log_path='logs', 
-                                n_eval_episodes=3,
-                                eval_freq=7296,
-                                deterministic=True )
-    model.learn(total_timesteps=params["train_len"], log_interval=1, callback=eval_callback)
+    # remove filename to get the same filepath
+    eval_callback = EvalCallback(
+        test_env, 
+        best_model_save_path=log_folder,
+        log_path='logs', 
+        n_eval_episodes=3,
+        eval_freq=get_index(end_date)-get_index(start_date),
+        deterministic=True
+    )
+    model.learn(total_timesteps=max_steps, log_interval=1, callback=eval_callback)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     print("Importing best model")
-    model = DQN.load("models/best_model")
+    model = DQN.load("%s/best_model" % log_folder)
     print("Finishing importing best model")
 
     # validation
@@ -176,34 +219,17 @@ def run_n_qlearn(n_cpu, params):
         # returns (action (as array), state)
         return model.predict(obs, deterministic=True)[0].flat[0]
 
-    eval_params = params.copy()
-    eval_params["start_index"] = eval_params["end_index"]
-    eval_params["end_index"] = 4*24*90
-    n_steps = eval_params["end_index"] - eval_params["start_index"]
-    eval_params["norm_rwd"] = False
-    eval_params["daily_cost"] = 0
-    eval_params["delay_cost"] = False
-    eval_params["solar_scale"] = params["solar_scale_test"]
-
-    if len(params.get("settings_file", "")) > 5:
-        settings_fname_raw = os.path.os.path.splitext(os.path.basename(params['settings_file']))[0]
-        fname_base = f"alg=dqn_data=real_settings={settings_fname_raw}"
-    else:
-        raise Exception("You need to input a valid settings file")
-    fname = os.path.join("logs", fname_base)
-    eval_params["fname"] = fname
-
-    eval_env = make_env(0, eval_params)()
-
-    validate(eval_env, n_steps, eval_params, get_action)
+    log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
+    validate(eval_env, log_file, get_action)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
 
+    """
     parser.add_argument("--env_mode", type=str, default="default", choices=["default", "difference", "sigmoid"], help="Environment type")
     parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
     parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
-    parser.add_argument("--n_trials", type=int, default=1, help="Number of seeds to run")
+    parser.add_argument("--max_trials", type=int, default=1, help="Number of seeds to run")
     parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
 
     parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
@@ -218,30 +244,48 @@ if __name__ == "__main__":
     parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
     parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
     parser.add_argument("--exploration_fraction", type=float, default=0.99, help="Exploration")
+    """
 
-    parser.add_argument("--settings_file", type=str, default="")
-    params = vars(parser.parse_args())
+    parser.add_argument("--settings", type=str, required=True)
+    args = parser.parse_args()
 
-    params["policy_type"] = "MlpPolicy"
-    params["learning_starts"] = 20
-    params["batch_size"] = 48
-    params["target_update_interval"] = 540
-    params["max_grad_norm"] = 10
-    params["solar_scale_test"] = params["solar_scale_test"] if params["solar_scale_test"] >= 0 else params["solar_scale"]
-    if params["seed"] < 0:
-        params["seed"] = None
+    if len(args.settings) > 5 and args.settings[-4:] == "json":
+        with open(args.settings, "r") as fp:
+            settings = json.load(fp)
+    else:
+        raise Exception("Invalid settings file args.settings")
 
-    if len(params["settings_file"]) > 5 and params["settings_file"][-4:] == "json":
-        with open(params["settings_file"], "r") as fp:
-            new_settings = json.load(fp)
-        params.update(new_settings)
+    # convert to namedtuple
 
+    """
     if params["wandb_tune"]:
         tune.run_wandb(params)
-    else:
-        n_cpu = 1
-        seed_0 = params["seed"] if params["seed"] != None else 0
-        for s in range(seed_0, seed_0+ params["n_trials"]):
-            params["seed"] = s
-            run_n_qlearn(1, params)
-        # run_bangbang_offline(params)
+    """
+    # else:
+    seed_0 = settings["seed"] 
+    for seed in range(seed_0, seed_0+settings["max_trials"]):
+        run_qlearn(
+            seed,
+            settings["n_history"],
+            settings["max_steps"],
+            settings["env_mode"],
+            settings["norm_obs"],
+            settings["norm_rwd"],
+            settings["more_data"],
+            settings["daily_cost"],
+            settings["delay_cost"],
+            settings["solar_coloc"],
+            settings["solar_scale"],
+            settings["solar_scale_test"],
+            settings["policy_type"],
+            settings["learning_rate"],
+            settings["max_grad_norm"],
+            settings["learning_starts"],
+            settings["exploration_fraction"],
+            settings["exploration_final_eps"],
+            settings["gradient_steps"],
+            settings["batch_size"],
+            settings["target_update_interval"],
+            settings["log_folder"],
+        )
+    # run_bangbang_offline(params)
