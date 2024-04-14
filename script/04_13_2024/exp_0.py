@@ -153,16 +153,14 @@ if __name__ == "__main__":
         help="Which experiments to run. Must be given as two integers separate by a comma with no space"
     )
     args = parser.parse_args()
+    seed_0 = 0
 
     if args.setup:
-        seed_0 = 1
-        max_trials = 10
+        max_trials = 3
         max_steps = 200_000
         if args.mode == "validate":
-            seed_0 = 0
             max_trials = 1
         elif args.mode == "work":
-            seed_0 = 0
             max_trials = 1
             max_steps = 10_000
 
