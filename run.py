@@ -1,6 +1,7 @@
 import os
 import time
 import multiprocessing as mp
+import concurrent
 import json
 
 import numpy as np
@@ -222,46 +223,7 @@ def run_qlearn(
     log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
     validate(eval_env, log_file, get_action)
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    """
-    parser.add_argument("--env_mode", type=str, default="default", choices=["default", "difference", "sigmoid"], help="Environment type")
-    parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
-    parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
-    parser.add_argument("--max_trials", type=int, default=1, help="Number of seeds to run")
-    parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
-
-    parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
-    parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
-    parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
-    parser.add_argument("--solar_coloc", action="store_true", help="Use solar colocation")
-    parser.add_argument("--solar_scale", type=float, default=0., help="Solar scaling")
-    parser.add_argument("--solar_scale_test", type=float, default=-1, help="Solar scaling for testing")
-    parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
-    parser.add_argument("--delay_cost", action="store_true", help="Delay cost of buying")
-
-    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
-    parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
-    parser.add_argument("--exploration_fraction", type=float, default=0.99, help="Exploration")
-    """
-
-    parser.add_argument("--settings", type=str, required=True)
-    args = parser.parse_args()
-
-    if len(args.settings) > 5 and args.settings[-4:] == "json":
-        with open(args.settings, "r") as fp:
-            settings = json.load(fp)
-    else:
-        raise Exception("Invalid settings file args.settings")
-
-    # convert to namedtuple
-
-    """
-    if params["wandb_tune"]:
-        tune.run_wandb(params)
-    """
-    # else:
+def _run(settings):
     seed_0 = settings["seed"] 
     for seed in range(seed_0, seed_0+settings["max_trials"]):
         run_qlearn(
@@ -288,4 +250,56 @@ if __name__ == "__main__":
             settings["target_update_interval"],
             settings["log_folder"],
         )
-    # run_bangbang_offline(params)
+
+def read_and_run(i):
+    settings_file = os.path.join("settings", "04_13_2024", "exp_0", "run_%s.json" % i)
+    with open(settings_file, "r") as fp:
+        settings = json.load(fp)
+    _run(settings)
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+
+    """
+    parser.add_argument("--env_mode", type=str, default="default", choices=["default", "difference", "sigmoid"], help="Environment type")
+    parser.add_argument("--train_len", type=int, default=int(1e4), help="Number of training steps")
+    parser.add_argument("--seed", type=int, default=-1, help="Seed for DQN (-1 is None)")
+    parser.add_argument("--max_trials", type=int, default=1, help="Number of seeds to run")
+    parser.add_argument("--wandb_tune", action="store_true", help="Tune with wandb")
+
+    parser.add_argument("--more_data", action="store_true", help="Get more data from environment")
+    parser.add_argument("--norm_obs", action="store_true", help="Normalize rewards between [0,1]")
+    parser.add_argument("--norm_rwd", action="store_true", help="Normalize rewards between [0,1]")
+    parser.add_argument("--solar_coloc", action="store_true", help="Use solar colocation")
+    parser.add_argument("--solar_scale", type=float, default=0., help="Solar scaling")
+    parser.add_argument("--solar_scale_test", type=float, default=-1, help="Solar scaling for testing")
+    parser.add_argument("--daily_cost", type=float, default=0, help="Fixed cost every step applied during training")
+    parser.add_argument("--delay_cost", action="store_true", help="Delay cost of buying")
+
+    parser.add_argument("--learning_rate", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--gradient_steps", type=float, default=-1, help="Gradient updates")
+    parser.add_argument("--exploration_fraction", type=float, default=0.99, help="Exploration")
+    """
+
+    parser.add_argument("--settings", type=str)
+    parser.add_argument("--parallel", action="store_true")
+    args = parser.parse_args()
+
+    if not args.parallel:
+
+        if len(args.settings) > 5 and args.settings[-4:] == "json":
+            with open(args.settings, "r") as fp:
+                settings = json.load(fp)
+        else:
+            raise Exception("Invalid settings file args.settings")
+
+        _run(settings)
+
+    else:
+        n_experiments = 19
+        n_cpus = mp.cpu_count()
+        print("num cpus: %s" % n_cpus)
+
+        with concurrent.futures.ProcessPoolExecutor() as executor:
+            for i in range(n_experiments):
+                executor.submit(read_and_run, i)

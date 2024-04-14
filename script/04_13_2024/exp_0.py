@@ -1,4 +1,5 @@
 import os
+import sys
 
 import argparse
 from collections import OrderedDict
@@ -8,7 +9,7 @@ max_runs = 19
 
 def parse_sub_runs(sub_runs):
     start_run_id, end_run_id = 0, max_runs
-    if (args.sub_runs is not None):
+    if (sub_runs is not None):
         try:
             start_run_id, end_run_id = sub_runs.split(",")
             start_run_id = int(start_run_id)
@@ -153,7 +154,6 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-
     if args.setup:
         seed_0 = 1
         max_trials = 10
@@ -173,4 +173,7 @@ if __name__ == "__main__":
 
         for i in range(start_run_id, end_run_id+1):
             settings_file = os.path.join(folder_name, "run_%s.json" % i)
+            # with open(args.settings, "r") as fp:
+            #     settings = json.load(fp)
+            # run(settings)
             os.system("python run.py --settings %s" % settings_file)
