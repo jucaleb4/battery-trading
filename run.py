@@ -55,9 +55,9 @@ def process_battery_env(env, seed, norm_obs, norm_rwd):
     env = FlattenObservation(env)
     env.reset(seed=seed)
     if norm_obs:
-        eval_env = NormalizeObservation(env)
+        env = NormalizeObservation(env)
     if norm_rwd:
-        eval_env = NormalizeReward(env)
+        env = NormalizeReward(env)
     if norm_obs or norm_rwd:
         for _ in range(1000):
             env.step(env.action_space.sample())
