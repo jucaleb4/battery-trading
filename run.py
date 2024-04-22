@@ -114,7 +114,9 @@ def get_train_and_test_envs(
         solar_coloc: bool,
         solar_scale: bool,
         solar_scale_test: bool,
-        preprocess_env=False,
+        reset_mode: str='zero',
+        reset_offset: int=0,
+        preprocess_env: bool=False,
 ):
     start_date = 0
     end_date = 90-14
@@ -136,6 +138,8 @@ def get_train_and_test_envs(
         solar_coloc=solar_coloc,
         solar_scale=solar_scale,
         seed=seed,
+        reset_mode=reset_mode,
+        reset_offset=reset_offset,
     )
     if preprocess_env:
         env = process_battery_env(env, seed, norm_obs, norm_rwd)
@@ -153,6 +157,8 @@ def get_train_and_test_envs(
         solar_coloc=solar_coloc,
         solar_scale=solar_scale,
         seed=1000+seed,
+        reset_mode=None,
+        reset_offset=0,
     )
     if preprocess_env:
         test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
@@ -173,6 +179,8 @@ def get_train_and_test_envs(
         solar_coloc=solar_coloc,
         solar_scale=solar_scale_test,
         seed=seed,
+        reset_mode=None,
+        reset_offset=0,
     )
     if preprocess_env:
         eval_env = process_battery_env(eval_env, 2000+seed, norm_obs, norm_rwd=False)
@@ -247,7 +255,7 @@ def run_qlearn(
     start_date = 0
     end_date = 90-14
 
-    eval_callback = EvalCallback(
+    test_best_callback = EvalCallback(
         test_env, 
         best_model_save_path=log_folder,
         log_path='logs', 
@@ -255,7 +263,7 @@ def run_qlearn(
         eval_freq=get_index(end_date)-get_index(start_date),
         deterministic=True
     )
-    model.learn(total_timesteps=max_steps, log_interval=1, callback=eval_callback)
+    model.learn(total_timesteps=max_steps, log_interval=1, callback=test_best_callback)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     print("Importing best model")
@@ -284,6 +292,8 @@ def run_ppo(
         solar_coloc: bool,
         solar_scale: bool,
         solar_scale_test: bool,
+        reset_mode: str,
+        reset_offset: int,
         policy_type: str,
         n_steps: int,
         batch_size: int, 
@@ -311,6 +321,8 @@ def run_ppo(
         solar_coloc,
         solar_scale,
         solar_scale_test,
+        reset_mode,
+        reset_offset,
         preprocess_env=True,
     )
 
@@ -334,7 +346,7 @@ def run_ppo(
     start_date = 0
     end_date = 90-14
 
-    eval_callback = EvalCallback(
+    test_best_callback = EvalCallback(
         test_env, 
         best_model_save_path=log_folder,
         log_path='logs', 
@@ -342,7 +354,7 @@ def run_ppo(
         eval_freq=get_index(end_date)-get_index(start_date),
         deterministic=True
     )
-    model.learn(total_timesteps=max_steps, log_interval=1, callback=eval_callback)
+    model.learn(total_timesteps=max_steps, log_interval=1, callback=test_best_callback)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
 
     print("Importing best model")
@@ -448,6 +460,8 @@ def _run(settings):
                 settings['solar_coloc'],
                 settings['solar_scale'],
                 settings['solar_scale_test'],
+                settings['reset_mode'],
+                settings['reset_offset'],
                 settings['policy_type'],
                 settings['n_steps'],
                 settings['batch_size'],
