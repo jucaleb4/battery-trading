@@ -35,7 +35,7 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         ("env_mode", "default"),
         ("norm_obs", False),
         ("norm_rwd", False),
-        ("more_data", True),
+        ("more_data", False),
         ("daily_cost", 0.0),
         ("delay_cost", False),
         ("solar_coloc", True),
