@@ -31,6 +31,8 @@ import functools
 from utils import TimelimitCallback
 from utils import SimpleLogger
 
+from bangbang import bang_bang_offline_training
+
 # import tune
 # import bangbang
 
@@ -96,7 +98,90 @@ def validate(env, log_file, get_action):
     except KeyboardInterrupt:
         logger.save()
 
+def get_train_and_test_envs(
+        pnode_id: str,
+        seed: int,
+        n_history: int,
+        env_mode: str,
+        norm_obs: bool,
+        norm_rwd: bool,
+        more_data: bool,
+        daily_cost: float,
+        delay_cost: float,
+        solar_coloc: bool,
+        solar_scale: bool,
+        solar_scale_test: bool,
+        preprocess_env=False,
+):
+    start_date = 0
+    end_date = 90-14
+    get_index = lambda x : 4*24*x
+
+    # Setup logging file and modify parameters for testing
+    print(f"Making environments")
+    s_time = time.time()
+    env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        pnode_id=pnode_id,
+        nhistory=n_history, 
+        start_index=get_index(start_date),
+        end_index=get_index(end_date),
+        max_episode_steps=get_index(end_date)-get_index(start_date),
+        mode=env_mode,
+        daily_cost=daily_cost,
+        more_data=more_data,
+        delay_cost=delay_cost,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        seed=seed,
+    )
+    if preprocess_env:
+        env = process_battery_env(env, seed, norm_obs, norm_rwd)
+    test_env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        pnode_id=pnode_id,
+        nhistory=n_history, 
+        start_index=get_index(start_date),
+        end_index=get_index(end_date),
+        max_episode_steps=get_index(end_date)-get_index(start_date),
+        mode=env_mode,
+        daily_cost=daily_cost,
+        more_data=more_data,
+        delay_cost=delay_cost,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        seed=1000+seed,
+    )
+    if preprocess_env:
+        test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
+
+    test_start_date = 90-14
+    test_end_date = 90
+    eval_env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        pnode_id=pnode_id,
+        nhistory=n_history, 
+        start_index=get_index(test_start_date),
+        end_index=get_index(test_end_date),
+        max_episode_steps=get_index(test_end_date)-get_index(test_start_date),
+        mode=env_mode,
+        daily_cost=0,
+        more_data=more_data,
+        delay_cost=False,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale_test,
+        seed=seed,
+    )
+    if preprocess_env:
+        eval_env = process_battery_env(eval_env, 2000+seed, norm_obs, norm_rwd=False)
+
+    setup_time = time.time()-s_time
+    print(f"Setup time (time={setup_time:.2f}s)\nStarting training")
+
+    return env, test_env, eval_env
+
 def run_qlearn(
+        pnode_id: str, 
         seed: int,
         n_history: int,
         max_steps: int,
@@ -124,64 +209,20 @@ def run_qlearn(
 
     :param seed: 
     """
-    start_date = 0
-    end_date = 90-14
-    get_index = lambda x : 4*24*x
-
-    # Setup logging file and modify parameters for testing
-    print(f"Making environments")
-    s_time = time.time()
-    env = gym.make(
-        id="gym_examples/BatteryEnv-v0", 
-        nhistory=n_history, 
-        start_index=get_index(start_date),
-        end_index=get_index(end_date),
-        max_episode_steps=get_index(end_date)-get_index(start_date),
-        mode=env_mode,
-        daily_cost=daily_cost,
-        more_data=more_data,
-        delay_cost=delay_cost,
-        solar_coloc=solar_coloc,
-        solar_scale=solar_scale,
-        seed=seed,
+    env, test_env, eval_env = get_train_and_test_envs(
+        pnode_id,
+        seed,
+        n_history,
+        env_mode,
+        norm_obs,
+        norm_rwd,
+        more_data,
+        daily_cost,
+        delay_cost,
+        solar_coloc,
+        solar_scale,
+        solar_scale_test,
     )
-    env = process_battery_env(env, seed, norm_obs, norm_rwd)
-    test_env = gym.make(
-        id="gym_examples/BatteryEnv-v0", 
-        nhistory=n_history, 
-        start_index=get_index(start_date),
-        end_index=get_index(end_date),
-        max_episode_steps=get_index(end_date)-get_index(start_date),
-        mode=env_mode,
-        daily_cost=daily_cost,
-        more_data=more_data,
-        delay_cost=delay_cost,
-        solar_coloc=solar_coloc,
-        solar_scale=solar_scale,
-        seed=1000+seed,
-    )
-    test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
-
-    test_start_date = 90-14
-    test_end_date = 90
-    eval_env = gym.make(
-        id="gym_examples/BatteryEnv-v0", 
-        nhistory=n_history, 
-        start_index=get_index(test_start_date),
-        end_index=get_index(test_end_date),
-        max_episode_steps=get_index(test_end_date)-get_index(test_start_date),
-        mode=env_mode,
-        daily_cost=0,
-        more_data=more_data,
-        delay_cost=False,
-        solar_coloc=solar_coloc,
-        solar_scale=solar_scale_test,
-        seed=seed,
-    )
-    eval_env = process_battery_env(eval_env, 2000+seed, norm_obs, norm_rwd=False)
-
-    setup_time = time.time()-s_time
-    print(f"Setup time (time={setup_time:.2f}s)\nStarting training")
 
     # train
     s_time = time.time()
@@ -223,33 +264,94 @@ def run_qlearn(
     log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
     validate(eval_env, log_file, get_action)
 
+def run_bangbang(
+        pnode_id: str,
+        seed: int,
+        max_iters: int,
+        solar_coloc: bool,
+        solar_scale: bool,
+        solar_scale_test: bool,
+        log_folder: str,
+    ):
+    """ Runs multiple DQN experiments
+
+    :param seed: 
+    """
+    env, _, eval_env = get_train_and_test_envs(
+        pnode_id,
+        seed,
+        n_history=4,
+        env_mode="default",
+        norm_obs=False,
+        norm_rwd=False,
+        more_data=False,
+        daily_cost=0,
+        delay_cost=False,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        solar_scale_test=solar_scale_test,
+        preprocess_env=False,
+    )
+
+    # train
+    buy_price, sell_price = bang_bang_offline_training(env, max_iter=max_iters, seed=seed)
+
+    # validation
+    sell, null, buy = 0, 1, 2
+    def get_action(obs):
+        last_lmp = obs["lmps"][0]
+        if last_lmp >= sell_price:
+            a = sell
+        elif last_lmp <= buy_price:
+            a = buy
+        else:
+            a = null
+        return a
+
+    log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
+    validate(eval_env, log_file, get_action)
+
 def _run(settings):
     seed_0 = settings["seed"] 
     for seed in range(seed_0, seed_0+settings["max_trials"]):
-        run_qlearn(
-            seed,
-            settings["n_history"],
-            settings["max_steps"],
-            settings["env_mode"],
-            settings["norm_obs"],
-            settings["norm_rwd"],
-            settings["more_data"],
-            settings["daily_cost"],
-            settings["delay_cost"],
-            settings["solar_coloc"],
-            settings["solar_scale"],
-            settings["solar_scale_test"],
-            settings["policy_type"],
-            settings["learning_rate"],
-            settings["max_grad_norm"],
-            settings["learning_starts"],
-            settings["exploration_fraction"],
-            settings["exploration_final_eps"],
-            settings["gradient_steps"],
-            settings["batch_size"],
-            settings["target_update_interval"],
-            settings["log_folder"],
-        )
+        if settings['alg'] == 'qlearn':
+            run_qlearn(
+                settings["pnode_id"],
+                seed,
+                settings["n_history"],
+                settings["max_steps"],
+                settings["env_mode"],
+                settings["norm_obs"],
+                settings["norm_rwd"],
+                settings["more_data"],
+                settings["daily_cost"],
+                settings["delay_cost"],
+                settings["solar_coloc"],
+                settings["solar_scale"],
+                settings["solar_scale_test"],
+                settings["policy_type"],
+                settings["learning_rate"],
+                settings["max_grad_norm"],
+                settings["learning_starts"],
+                settings["exploration_fraction"],
+                settings["exploration_final_eps"],
+                settings["gradient_steps"],
+                settings["batch_size"],
+                settings["target_update_interval"],
+                settings["log_folder"],
+            )
+        elif settings['alg'] == 'bangbang':
+            run_bangbang(
+                settings["pnode_id"],
+                seed,
+                settings['max_iters'],
+                settings['solar_coloc'],
+                settings['solar_scale'],
+                settings['solar_scale_test'],
+                settings["log_folder"],
+            )
+        else:
+            raise Exception("Unknown alg %s" % settings['alg'])
 
 def read_and_run(i):
     settings_file = os.path.join("settings", "04_13_2024", "exp_0", "run_%s.json" % i)
@@ -285,8 +387,17 @@ if __name__ == "__main__":
     parser.add_argument("--parallel", action="store_true")
     args = parser.parse_args()
 
-    if not args.parallel:
+    if len(args.settings) > 5 and args.settings[-4:] == "json":
+        with open(args.settings, "r") as fp:
+            settings = json.load(fp)
+    else:
+        raise Exception("Invalid settings file args.settings")
 
+    _run(settings)
+
+    # parallel does not work for SB3, probably need to use CleanRL
+    """
+    if not args.parallel:
         if len(args.settings) > 5 and args.settings[-4:] == "json":
             with open(args.settings, "r") as fp:
                 settings = json.load(fp)
@@ -303,3 +414,4 @@ if __name__ == "__main__":
         with concurrent.futures.ProcessPoolExecutor() as executor:
             for i in range(n_experiments):
                 executor.submit(read_and_run, i)
+    """

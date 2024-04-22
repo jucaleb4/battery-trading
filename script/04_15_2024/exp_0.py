@@ -23,38 +23,24 @@ def parse_sub_runs(sub_runs):
 
 def setup_setting_files(seed_0, max_trials, max_steps):
     od = OrderedDict([
-        ("alg", "qlearn"),
-        ("max_trials", max_trials),
-        ("seed", seed_0),
-        ("pnode_id", "MIL1_3_PASGNODE"),
+        # ("seed", seed_0),
         ("n_history", 16),
-        ("max_steps", max_steps),
         ("env_mode", "default"),
-        ("norm_obs", False),
-        ("norm_rwd", False),
+        # ("norm_obs", False),
+        # ("norm_rwd", False),
         ("more_data", False),
         ("daily_cost", 0.0),
         ("delay_cost", False),
         ("solar_coloc", True),
         ("solar_scale", 0.0),
         ("solar_scale_test", 0.0),
-        ("policy_type", "MlpPolicy"),
-        ("learning_rate", 0.000918),
-        ("max_grad_norm", 10),
-        ("solar_scale_test", 0.25),
-        ("learning_starts", 20),
-        ("exploration_fraction", 0.9685),
-        ("exploration_final_eps", 0.05),
-        ("gradient_steps", -1),
-        ("batch_size", 48),
-        ("target_update_interval", 540),
     ])
 
-    folder_name = os.path.join("settings", "04_14_2024", "exp_0")
+    folder_name = os.path.join("settings", "04_15_2024", "exp_0")
     if not(os.path.exists(folder_name)):
         os.makedirs(folder_name)
     for i in range(0,max_runs+1):
-        log_folder_base = os.path.join("logs", "04_14_2024", "exp_0")
+        log_folder_base = os.path.join("logs", "04_15_2024", "exp_0")
         if not(os.path.exists(log_folder_base)):
             os.makedirs(log_folder_base)
 

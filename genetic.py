@@ -81,6 +81,10 @@ def genetic_algorithm(objective, bounds, n_bits, n_iter, n_pop, r_cross, r_mut, 
     return [np.array(best), best_eval]
 
 def optimize(objective, lbs, ubs, n_iter=100, n_pop=100, seed=None):
+    """ 
+    Optimizes objective
+    :param objective: black-box function that takes in tuple for bounds
+    """
     bounds = [[lb, ub] for (lb,ub) in zip(lbs, ubs)]
     n_bits = 16
     r_cross = 0.9

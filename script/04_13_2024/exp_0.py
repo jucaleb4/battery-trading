@@ -23,7 +23,9 @@ def parse_sub_runs(sub_runs):
 
 def setup_setting_files(seed_0, max_trials, max_steps):
     od = OrderedDict([
+        ("alg", "qlearn"),
         ("max_trials", max_trials),
+        ("pnode_id", "MIL1_3_PASGNODE"),
         ("seed", seed_0),
         ("n_history", 16),
         ("max_steps", max_steps),
