@@ -15,6 +15,7 @@ if True:
 import argparse
 
 from stable_baselines3 import DQN
+from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 import gymnasium as gym
@@ -269,6 +270,93 @@ def run_qlearn(
     log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
     validate(eval_env, log_file, get_action)
 
+def run_ppo(
+        pnode_id: str, 
+        seed: int,
+        n_history: int,
+        max_steps: int,
+        env_mode: str,
+        norm_obs: bool,
+        norm_rwd: bool,
+        more_data: bool,
+        daily_cost: float,
+        delay_cost: float,
+        solar_coloc: bool,
+        solar_scale: bool,
+        solar_scale_test: bool,
+        policy_type: str,
+        n_steps: int,
+        batch_size: int, 
+        n_epochs: int,
+        gamma: float,
+        gae_lambda: float,
+        normalize_advantage: bool,
+        max_grad_norm: float,
+        log_folder: str,
+    ):
+    """ Runs multiple DQN experiments
+
+    :param seed: 
+    """
+    env, test_env, eval_env = get_train_and_test_envs(
+        pnode_id,
+        seed,
+        n_history,
+        env_mode,
+        norm_obs,
+        norm_rwd,
+        more_data,
+        daily_cost,
+        delay_cost,
+        solar_coloc,
+        solar_scale,
+        solar_scale_test,
+        preprocess_env=True,
+    )
+
+    # train
+    s_time = time.time()
+    model = PPO(
+        policy=policy_type, 
+        env=env, 
+        verbose=1, 
+        seed=seed,
+        n_steps=n_steps,
+        batch_size=batch_size,
+        n_epochs=n_epochs,
+        gamma=gamma,
+        gae_lambda=gae_lambda,
+        normalize_advantage=normalize_advantage,
+        max_grad_norm=max_grad_norm,
+    )
+    # we should validate on the test environment
+    # remove filename to get the same filepath
+    start_date = 0
+    end_date = 90-14
+
+    eval_callback = EvalCallback(
+        test_env, 
+        best_model_save_path=log_folder,
+        log_path='logs', 
+        n_eval_episodes=3,
+        eval_freq=get_index(end_date)-get_index(start_date),
+        deterministic=True
+    )
+    model.learn(total_timesteps=max_steps, log_interval=1, callback=eval_callback)
+    print(f"Finished training (time={time.time()-s_time:.2f}s)")
+
+    print("Importing best model")
+    model = PPO.load("%s/best_model" % log_folder)
+    print("Finishing importing best model")
+
+    # validation
+    def get_action(obs):
+        # returns (action (as array), state)
+        return model.predict(obs, deterministic=True)[0].flat[0]
+
+    log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
+    validate(eval_env, log_file, get_action)
+
 def run_bangbang(
         pnode_id: str,
         seed: int,
@@ -344,6 +432,31 @@ def _run(settings):
                 settings["batch_size"],
                 settings["target_update_interval"],
                 settings["log_folder"],
+            )
+        elif settings['alg'] == 'ppo':
+            run_ppo(
+                settings['pnode_id'],
+                seed,
+                settings['n_history'],
+                settings['max_steps'],
+                settings['env_mode'],
+                settings['norm_obs'],
+                settings['norm_rwd'],
+                settings['more_data'],
+                settings['daily_cost'],
+                settings['delay_cost'],
+                settings['solar_coloc'],
+                settings['solar_scale'],
+                settings['solar_scale_test'],
+                settings['policy_type'],
+                settings['n_steps'],
+                settings['batch_size'],
+                settings['n_epochs'],
+                settings['gamma'],
+                settings['gae_lambda'],
+                settings['normalize_advantage'],
+                settings['max_grad_norm'],
+                settings['log_folder'],
             )
         elif settings['alg'] == 'bangbang':
             run_bangbang(
