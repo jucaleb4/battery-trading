@@ -5,7 +5,7 @@ import argparse
 from collections import OrderedDict
 import json
 
-MAX_RUNS = 12
+MAX_RUNS = 15
 DATE = "04_21_2024"
 EXP_ID  = 2
 
@@ -142,6 +142,26 @@ def setup_setting_files(seed_0, max_trials, max_steps):
             setting_fname = os.path.join(setting_folder_base,  "run_%s.json" % ct)
             log_folder = os.path.join(log_folder_base, "run_%s" % ct)
             od["solar_scale"] = 0
+            od["solar_scale_test"] = solar
+            od["log_folder"] = log_folder
+            if not(os.path.exists(od["log_folder"])):
+                os.makedirs(od["log_folder"])
+            with open(setting_fname, 'w', encoding='utf-8') as f:
+                json.dump(od, f, ensure_ascii=False, indent=4)
+            ct += 1
+
+    od['delay_cost'] = False
+    od['norm_obs'] = True
+    od['norm_rwd'] = True
+    for pnode_id in pnodes:
+        od["pnode_id"] = pnode_id
+
+        # create control with various penalties
+        solars = [0.0, 0.25, 0.75]
+        for solar in solars:
+            setting_fname = os.path.join(setting_folder_base,  "run_%s.json" % ct)
+            log_folder = os.path.join(log_folder_base, "run_%s" % ct)
+            od["solar_scale"] = solar
             od["solar_scale_test"] = solar
             od["log_folder"] = log_folder
             if not(os.path.exists(od["log_folder"])):
