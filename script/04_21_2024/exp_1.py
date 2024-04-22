@@ -5,7 +5,7 @@ import argparse
 from collections import OrderedDict
 import json
 
-MAX_RUNS = 3
+MAX_RUNS = 12
 DATE = "04_21_2024"
 EXP_ID  = 1
 
