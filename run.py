@@ -36,6 +36,8 @@ from bangbang import bang_bang_offline_training
 # import tune
 # import bangbang
 
+get_index = lambda x : 4*24*x
+
 def deprecated(func):
     """This is a decorator which can be used to mark functions
     as deprecated. It will result in a warning being emitted
@@ -115,7 +117,6 @@ def get_train_and_test_envs(
 ):
     start_date = 0
     end_date = 90-14
-    get_index = lambda x : 4*24*x
 
     # Setup logging file and modify parameters for testing
     print(f"Making environments")
@@ -222,6 +223,7 @@ def run_qlearn(
         solar_coloc,
         solar_scale,
         solar_scale_test,
+        preprocess_env=True,
     )
 
     # train
@@ -241,6 +243,9 @@ def run_qlearn(
     )
     # we should validate on the test environment
     # remove filename to get the same filepath
+    start_date = 0
+    end_date = 90-14
+
     eval_callback = EvalCallback(
         test_env, 
         best_model_save_path=log_folder,

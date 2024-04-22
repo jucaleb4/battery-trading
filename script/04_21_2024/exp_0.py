@@ -30,8 +30,8 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         ("pnode_id", "MIL1_3_PASGNODE"),
         ("seed", seed_0),
         ("n_history", 16),
-        # ("max_iters", 64), # this is for bangbang
-        ("max_steps", max_steps),
+        ("max_iters", 64), # this is for bangbang
+        ("max_steps", max_steps), # this is for q-learning
         ("env_mode", "default"),
         ("norm_obs", False),
         ("norm_rwd", False),
@@ -60,26 +60,31 @@ def setup_setting_files(seed_0, max_trials, max_steps):
     if not(os.path.exists(setting_folder_base)):
         os.makedirs(setting_folder_base)
 
+    algs = ["qlearn", "bangbang"]
     pnodes = ["ALAMT3G_7_B1", "PAULSWT_1_GN002", "FREMNT_1_N013"]
     ct = 0
 
-    # iterate over various pnodes
-    for pnode_id in pnodes:
-        od["pnode_id"] = pnode_id
+    # iterate over the two algs
+    for alg in algs:
+        od["alg"] = alg
 
-        # create control with various penalties
-        solars = [0.0, 0.25, 0.75]
-        for solar in solars:
-            setting_fname = os.path.join(setting_folder_base,  "run_%s.json" % ct)
-            log_folder = os.path.join(log_folder_base, "run_%s" % ct)
-            od["solar_scale"] = solar
-            od["solar_scale_test"] = solar
-            od["log_folder"] = log_folder
-            if not(os.path.exists(od["log_folder"])):
-                os.makedirs(od["log_folder"])
-            with open(setting_fname, 'w', encoding='utf-8') as f:
-                json.dump(od, f, ensure_ascii=False, indent=4)
-            ct += 1
+        # iterate over various pnodes
+        for pnode_id in pnodes:
+            od["pnode_id"] = pnode_id
+
+            # create control with various penalties
+            solars = [0.0, 0.25, 0.75]
+            for solar in solars:
+                setting_fname = os.path.join(setting_folder_base,  "run_%s.json" % ct)
+                log_folder = os.path.join(log_folder_base, "run_%s" % ct)
+                od["solar_scale"] = solar
+                od["solar_scale_test"] = solar
+                od["log_folder"] = log_folder
+                if not(os.path.exists(od["log_folder"])):
+                    os.makedirs(od["log_folder"])
+                with open(setting_fname, 'w', encoding='utf-8') as f:
+                    json.dump(od, f, ensure_ascii=False, indent=4)
+                ct += 1
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
