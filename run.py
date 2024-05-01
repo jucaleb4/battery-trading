@@ -75,7 +75,7 @@ def validate(env, log_file, get_action):
     """
     obs, info = env.reset()
     all_info_keys = list(info.keys())
-    info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp"]
+    info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp", "net_load"]
     assert set(info_keys) <= set(all_info_keys)
 
     logger = SimpleLogger(log_file, info_keys)
