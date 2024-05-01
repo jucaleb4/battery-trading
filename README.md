@@ -15,7 +15,7 @@ python script/04_30_2024/exp_0.py --run --sub_runs 0,2
 ```
 
 ## Log data
-The data is stored in a csv file in `logs/`, which is further sorted by dates, experiment id, and run id (e.g., `logs/04_30_2024/exp_0/run_0/`). The meaning behind each run id is shown in pdf files in the `metadata` folder.
+The data is stored in a csv file in `logs/` (ignore this folder, since it is just a testing folding before I run it on a cluster) or `iris_logs/`, which is further sorted by dates, experiment id, and run id (e.g., `logs/04_30_2024/exp_0/run_0/`). The meaning behind each run id is shown in pdf files in the `metadata` folder.
 
 Our experiments were run on NERSC's [Iris](https://iris.nersc.gov), so we dedicated a folder for some of those runs in `iris_logs/`.
 
