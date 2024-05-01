@@ -121,7 +121,7 @@ def get_train_and_test_envs(
         preprocess_env: bool=False,
 ):
     start_date = 0
-    end_date = 90-14
+    end_date = 90-7
 
     # Setup logging file and modify parameters for testing
     print(f"Making environments")
@@ -167,7 +167,7 @@ def get_train_and_test_envs(
     if preprocess_env:
         test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
 
-    test_start_date = 90-14
+    test_start_date = 90-7
     test_end_date = 90
     eval_env = gym.make(
         id="gym_examples/BatteryEnv-v0", 
@@ -260,7 +260,7 @@ def run_qlearn(
     # we should validate on the test environment
     # remove filename to get the same filepath
     start_date = 0
-    end_date = 90-14
+    end_date = 90-7
 
     test_best_callback = EvalCallback(
         test_env, 
