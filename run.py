@@ -115,7 +115,6 @@ def get_train_and_test_envs(
         solar_coloc: bool,
         solar_scale: bool,
         solar_scale_test: bool,
-        start_date: str='S23',
         reset_mode: str='zero',
         reset_offset: int=0,
         preprocess_env: bool=False,
