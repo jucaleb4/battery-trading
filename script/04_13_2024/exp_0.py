@@ -1,4 +1,5 @@
 import os
+import sys
 
 import argparse
 from collections import OrderedDict
@@ -8,7 +9,7 @@ max_runs = 19
 
 def parse_sub_runs(sub_runs):
     start_run_id, end_run_id = 0, max_runs
-    if (args.sub_runs is not None):
+    if (sub_runs is not None):
         try:
             start_run_id, end_run_id = sub_runs.split(",")
             start_run_id = int(start_run_id)
@@ -22,7 +23,9 @@ def parse_sub_runs(sub_runs):
 
 def setup_setting_files(seed_0, max_trials, max_steps):
     od = OrderedDict([
+        ("alg", "qlearn"),
         ("max_trials", max_trials),
+        ("pnode_id", "MIL1_3_PASGNODE"),
         ("seed", seed_0),
         ("n_history", 16),
         ("max_steps", max_steps),
@@ -152,17 +155,14 @@ if __name__ == "__main__":
         help="Which experiments to run. Must be given as two integers separate by a comma with no space"
     )
     args = parser.parse_args()
-
+    seed_0 = 0
 
     if args.setup:
-        seed_0 = 1
-        max_trials = 10
+        max_trials = 3
         max_steps = 200_000
         if args.mode == "validate":
-            seed_0 = 0
             max_trials = 1
         elif args.mode == "work":
-            seed_0 = 0
             max_trials = 1
             max_steps = 10_000
 
@@ -173,4 +173,7 @@ if __name__ == "__main__":
 
         for i in range(start_run_id, end_run_id+1):
             settings_file = os.path.join(folder_name, "run_%s.json" % i)
+            # with open(args.settings, "r") as fp:
+            #     settings = json.load(fp)
+            # run(settings)
             os.system("python run.py --settings %s" % settings_file)
