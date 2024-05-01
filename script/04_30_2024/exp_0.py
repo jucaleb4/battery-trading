@@ -30,7 +30,7 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         ("pnode_id", "MIL1_3_PASGNODE"),
         ("seed", seed_0),
         ("n_history", 16),
-        ("start_date", 'W23'),
+        ("season", 'W23'),
         ("max_iters", 64), # this is for bangbang
         ("max_steps", max_steps), # this is for q-learning
         ("env_mode", "default"),
@@ -68,7 +68,7 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         'COTWDPGE_1_N001',
         'ALAMT3G_7_B1'
     ]
-    start_dates = ['W23', 'S23']
+    seasons = ['W23', 'S23']
     ct = 0
 
     # iterate over the two algs
@@ -79,8 +79,8 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         for pnode_id in pnodes:
             od["pnode_id"] = pnode_id
 
-            for start_date in start_dates:
-                od['start_date'] = start_date
+            for season in seasons:
+                od['season'] = season
 
                 # create control with various penalties
                 solars = [0.0, 0.25, 0.75]
