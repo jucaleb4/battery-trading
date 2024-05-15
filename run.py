@@ -105,7 +105,14 @@ def get_train_and_test_envs(
         pnode_id: str,
         seed: int,
         n_history: int,
-        season: str,
+        # season: str,
+        # NEW:
+        train_season: str,
+        test_season: str,
+        train_start_date: int,
+        train_len_dates: int,
+        test_start_date: int,
+        test_len_dates: int,
         env_mode: str,
         norm_obs: bool,
         norm_rwd: bool,
@@ -119,8 +126,6 @@ def get_train_and_test_envs(
         reset_offset: int=0,
         preprocess_env: bool=False,
 ):
-    start_date = 0
-    end_date = 90-7
 
     # Setup logging file and modify parameters for testing
     print(f"Making environments")
@@ -129,10 +134,9 @@ def get_train_and_test_envs(
         id="gym_examples/BatteryEnv-v0", 
         pnode_id=pnode_id,
         nhistory=n_history, 
-        season=season,
-        index_offset=get_index(start_date),
-        # end_index=get_index(end_date),
-        max_episode_steps=get_index(end_date)-get_index(start_date),
+        season=train_season,
+        index_offset=get_index(train_start_date),
+        max_episode_steps=get_index(train_len_dates),
         mode=env_mode,
         daily_cost=daily_cost,
         more_data=more_data,
@@ -145,14 +149,14 @@ def get_train_and_test_envs(
     )
     if preprocess_env:
         env = process_battery_env(env, seed, norm_obs, norm_rwd)
+
     test_env = gym.make(
         id="gym_examples/BatteryEnv-v0", 
         pnode_id=pnode_id,
         nhistory=n_history, 
-        season=season,
-        index_offset=get_index(start_date),
-        # end_index=get_index(end_date),
-        max_episode_steps=get_index(end_date)-get_index(start_date),
+        season=train_season,
+        index_offset=get_index(train_start_date),
+        max_episode_steps=get_index(train_len_dates),
         mode=env_mode,
         daily_cost=daily_cost,
         more_data=more_data,
@@ -166,16 +170,14 @@ def get_train_and_test_envs(
     if preprocess_env:
         test_env = process_battery_env(test_env, 1000+seed, norm_obs, norm_rwd)
 
-    test_start_date = 90-7
-    test_end_date = 90
     eval_env = gym.make(
         id="gym_examples/BatteryEnv-v0", 
         pnode_id=pnode_id,
         nhistory=n_history, 
-        season=season,
+        season=test_season,
         index_offset=get_index(test_start_date),
         # end_index=get_index(test_end_date),
-        max_episode_steps=get_index(test_end_date)-get_index(test_start_date),
+        max_episode_steps=get_index(test_len_dates),
         mode=env_mode,
         daily_cost=0,
         more_data=more_data,
@@ -198,7 +200,12 @@ def run_qlearn(
         pnode_id: str, 
         seed: int,
         n_history: int,
-        season: str,
+        train_season: str,
+        test_season: str,
+        train_start_date: int,
+        train_len_dates: int,
+        test_start_date: int,
+        test_len_dates: int,
         max_steps: int,
         env_mode: str,
         norm_obs: bool,
@@ -228,7 +235,12 @@ def run_qlearn(
         pnode_id,
         seed,
         n_history,
-        season,
+        train_season,
+        test_season,
+        train_start_date,
+        train_len_dates,
+        test_start_date,
+        test_len_dates,
         env_mode,
         norm_obs,
         norm_rwd,
@@ -258,15 +270,13 @@ def run_qlearn(
     )
     # we should validate on the test environment
     # remove filename to get the same filepath
-    start_date = 0
-    end_date = 90-7
 
     test_best_callback = EvalCallback(
         test_env, 
         best_model_save_path=log_folder,
         log_path='logs', 
         n_eval_episodes=3,
-        eval_freq=get_index(end_date)-get_index(start_date),
+        eval_freq=get_index(train_len_dates),
         deterministic=True
     )
     model.learn(total_timesteps=max_steps, log_interval=1, callback=test_best_callback)
@@ -381,7 +391,12 @@ def run_bangbang(
         pnode_id: str,
         seed: int,
         max_iters: int,
-        season: str,
+        train_season: str,
+        test_season: str,
+        train_start_date: int,
+        train_len_dates: int,
+        test_start_date: int,
+        test_len_dates: int,
         solar_coloc: bool,
         solar_scale: bool,
         solar_scale_test: bool,
@@ -395,7 +410,12 @@ def run_bangbang(
         pnode_id,
         seed,
         n_history=4,
-        season=season,
+        train_season=train_season,
+        test_season=test_season,
+        train_start_date=train_start_date,
+        train_len_dates=train_len_dates,
+        test_start_date=test_start_date,
+        test_len_dates=test_len_dates,
         env_mode="default",
         norm_obs=False,
         norm_rwd=False,
@@ -434,7 +454,12 @@ def _run(settings):
                 settings["pnode_id"],
                 seed,
                 settings["n_history"],
-                settings["season"],
+                settings["train_season"],
+                settings["test_season"],
+                settings["train_start_date"],
+                settings["train_len_dates"],
+                settings["test_start_date"],
+                settings["test_len_dates"],
                 settings["max_steps"],
                 settings["env_mode"],
                 settings["norm_obs"],
@@ -489,7 +514,12 @@ def _run(settings):
                 settings["pnode_id"],
                 seed,
                 settings['max_iters'],
-                settings['season'],
+                settings["train_season"],
+                settings["test_season"],
+                settings["train_start_date"],
+                settings["train_len_dates"],
+                settings["test_start_date"],
+                settings["test_len_dates"],
                 settings['solar_coloc'],
                 settings['solar_scale'],
                 settings['solar_scale_test'],
