@@ -15,6 +15,10 @@ python script/04_30_2024/exp_0.py --run --sub_runs 0,2
 ```
 
 ## Log data
-The data is stored in a csv file in `logs/`, which is further sorted by dates and experiment id. 
+The data is stored in a csv file in `logs/` (ignore this folder, since it is just a testing folding before I run it on a cluster) or `iris_logs/`, which is further sorted by dates, experiment id, and run id (e.g., `logs/04_30_2024/exp_0/run_0/`). The meaning behind each run id is shown in pdf files in the `metadata` folder.
 
 Our experiments were run on NERSC's [Iris](https://iris.nersc.gov), so we dedicated a folder for some of those runs in `iris_logs/`.
+
+Each run folder has csv data files, where each csv corresponds to a seed. For example, let's look at `logs/04_30_2024/exp_0/run_0/seed=0.csv`.
+
+The data includes a header, which contains the decomposition of the rewards, state/observation, net load, and action (0 is discharge battery, 1 is null action, and 2 is charge battery).
