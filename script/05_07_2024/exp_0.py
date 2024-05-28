@@ -95,6 +95,7 @@ def setup_setting_files(seed_0, max_trials, max_steps):
                 for solar in solars:
                     setting_fname = os.path.join(setting_folder_base,  "run_%s.json" % ct)
                     log_folder = os.path.join(log_folder_base, "run_%s" % ct)
+                    od["solar_coloc"] = solar > 0
                     od["solar_scale"] = solar
                     od["solar_scale_test"] = solar
                     od["log_folder"] = log_folder
