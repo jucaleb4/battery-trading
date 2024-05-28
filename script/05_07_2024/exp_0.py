@@ -68,7 +68,10 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         'COTWDPGE_1_N001',
         'ALAMT3G_7_B1'
     ]
-    seasons = ['W23', 'S23']
+    testtrain_modes = [
+        ("w23", "w23", 0, 90-7, 90-7, 7),
+        ("S23", "S23", 0, 90-7, 90-7, 7),
+    ]
     ct = 0
 
     # iterate over the two algs
@@ -79,8 +82,13 @@ def setup_setting_files(seed_0, max_trials, max_steps):
         for pnode_id in pnodes:
             od["pnode_id"] = pnode_id
 
-            for season in seasons:
-                od['season'] = season
+            for (tst_s, tr_s, tr_st, tr_l, tst_st, tst_l) in testtrain_modes:
+                od['test_season'] = tst_s
+                od['train_season'] = tr_s
+                od["train_start_date"] = tr_st
+                od["train_len_dates"] = tr_l
+                od["test_start_date"] = tst_st
+                od["test_len_dates"] = tst_l
 
                 # create control with various penalties
                 solars = [0.0, 0.25, 0.75]
@@ -117,8 +125,10 @@ if __name__ == "__main__":
     seed_0 = 0
 
     if args.setup:
-        max_trials = 3
+        max_trials = 9
         max_steps = 200_000
+        if args.mode == 'full':
+            seed_0 = 1
         if args.mode == "validate":
             max_trials = 1
         elif args.mode == "work":
