@@ -129,7 +129,9 @@ if __name__ == "__main__":
         max_trials = 9
         max_steps = 200_000
         if args.mode == 'full':
-            seed_0 = 1
+            # seed_0 = 1
+            seed_0 = 0
+            max_trials = 10
         if args.mode == "validate":
             max_trials = 1
         elif args.mode == "work":
