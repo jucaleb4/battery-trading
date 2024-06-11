@@ -1,4 +1,5 @@
 import os
+import time
 
 import cvxpy as cp
 import numpy as np
@@ -190,6 +191,181 @@ def perfect_with_solar():
         np.savetxt(fp, data_arr, fmt=fmt)
     print(f"Saved perfect data (total reward: {total_reward}")
 
+def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, solar_scale, log_folder):
+    """ 
+    Mixed-integer linear program for battery with efficiency, degradation, and
+    solar.
+    """
+    get_index = lambda x : 4*24*x
+    T = get_index(test_len_dates)
+    seed = 0
+    power = 100
+    capacity = 400
+    eta = 0.93      # efficiency
+    env = gym.make(
+        id="gym_examples/BatteryEnv-v0", 
+        battery_capacity=capacity,
+        battery_power=power,
+        pnode_id=pnode_id,
+        nhistory=4, 
+        season=test_season,
+        index_offset=get_index(test_start_date),
+        max_episode_steps=get_index(test_len_dates),
+        mode='default',
+        efficiency=eta,
+        daily_cost=0,
+        more_data=False,
+        delay_cost=False,
+        solar_coloc=True,
+        solar_scale=solar_scale,
+        seed=seed,
+        reset_mode='zero',
+        reset_offset=0,
+    )
+
+    c_lmp = np.zeros(T)
+    solar = np.zeros(T)
+    s, _ = env.reset()
+    c_lmp[0] = s['lmps'][0]
+    solar[0] = s['solars'][0]
+    for i in range(1,T):
+        # null action
+        s, _, _, _, _ = env.step(1)
+        c_lmp[i] = s['lmps'][0]
+        solar[i] = s['solars'][0]
+
+    rt_scale = 0.25 # 15 min intervals
+    
+    # binary
+    z_buy  = cp.Variable(T, boolean=True)
+    z_sell = cp.Variable(T, boolean=True)
+    z_null = cp.Variable(T, boolean=True)
+    z_min  = cp.Variable(T, boolean=True)
+    z_max  = cp.Variable(T, boolean=True)
+    z_full = cp.Variable(T, boolean=True)
+
+    # state of charge and min/max value holders
+    x_soc = cp.Variable(T+1)
+    # x_tsoc = cp.Variable(T)
+    p = cp.Variable(T)
+    q = cp.Variable(T)
+
+    # reward
+    r = cp.Variable(T)
+
+    constraints = []
+    # big-M constants
+    M = capacity
+    M_2 = np.max(np.abs(c_lmp)) * (power*rt_scale + np.max(np.abs(solar)))
+    beta_pct = 1-0.1 # threshold for degradation
+    beta = 1-0.1/(4*24) # degradation
+
+    # transition constraints
+    for t in range(T):
+        constraints += [
+            # x_soc[t+1] >= x_tsoc[t] + eta*p[t] - M*(1-z_buy[t]),
+            # x_soc[t+1] <= x_tsoc[t] + eta*p[t] + M*(1-z_buy[t])
+            x_soc[t+1] <= x_soc[t] + eta*p[t] + M*(1-z_buy[t])
+        ]
+        constraints += [
+            # x_soc[t+1] >= q[t] - M*(1-z_sell[t]),
+            x_soc[t+1] <= q[t] + M*(1-z_sell[t])
+        ]
+        constraints += [
+            # x_soc[t+1] >= x_tsoc[t] - M*(1-z_null[t]),
+            x_soc[t+1] >= x_soc[t] - M*(1-z_null[t]),
+            # x_soc[t+1] <= x_tsoc[t] + M*(1-z_null[t])
+        ]
+        constraints += [z_buy[t] + z_sell[t] + z_null[t] == 1]
+
+    # min: https://or.stackexchange.com/questions/1160/how-to-linearize-min-function-as-a-constraint
+    for t in range(T):
+        # constraints += [p[t] <= capacity - x_tsoc[t]]
+        constraints += [p[t] <= capacity - x_soc[t]]
+        constraints += [p[t] <= power*rt_scale]
+        constraints += [
+            # p[t] >= capacity - x_tsoc[t] - M*(1-z_min[t]),
+            p[t] >= capacity - x_soc[t] - M*(1-z_min[t]),
+            p[t] >= power*rt_scale - M*z_min[t]
+        ]
+
+    # max: https://or.stackexchange.com/questions/711/how-to-formulate-linearize-a-maximum-function-in-a-constraint/712#712
+    for t in range(T):
+        constraints += [q[t] >= 0]
+        # constraints += [q[t] >= x_tsoc[t] - power*rt_scale]
+        constraints += [q[t] >= x_soc[t] - power*rt_scale]
+        constraints += [
+            q[t] <= M*(1-z_max[t]),
+            # q[t] <= x_tsoc[t] - power*rt_scale + M*z_max[t]
+            q[t] <= x_soc[t] - power*rt_scale + M*z_max[t]
+        ]
+
+    # battery degredation: https://stackoverflow.com/questions/55899166/build-milp-constraint-from-if-else-statements
+    for t in range(T):
+        pass
+        # constraints += [x_tsoc[t] - x_soc[t] == 0]
+        """
+        constraints += [
+            x_tsoc[t] >= beta*x_soc[t] - M*(1-z_full[t]),
+            x_tsoc[t] <= beta*x_soc[t] + M*(1-z_full[t])
+        ]
+        constraints += [
+            x_tsoc[t] >= x_soc[t] - M*z_full[t],
+            x_tsoc[t] <= x_soc[t] + M*z_full[t]
+        ]
+        constraints += [
+            beta_pct*capacity - x_soc[t] <= M*(1-z_full[t]),
+            -beta_pct*capacity + x_soc[t] <= M*z_full[t]
+        ]
+        """
+
+    # reward
+    for t in range(T):
+        constraints += [
+            # r[t] >= c_lmp[t]*((1./eta)*(x_tsoc[t]-x_soc[t+1]) + solar[t]) - M_2*(1-z_buy[t]),
+            r[t] >= c_lmp[t]*((1./eta)*(x_soc[t]-x_soc[t+1]) + solar[t]) - M_2*(1-z_buy[t]),
+            # r[t] <= c_lmp[t]*((1./eta)*(x_tsoc[t]-x_soc[t+1]) + solar[t]) + M_2*(1-z_buy[t]),
+            r[t] <= c_lmp[t]*((1./eta)*(x_soc[t]-x_soc[t+1]) + solar[t]) + M_2*(1-z_buy[t]),
+        ]
+        constraints += [
+            # r[t] >= c_lmp[t]*(eta*(x_tsoc[t]-x_soc[t+1]) + solar[t]) - M_2*z_buy[t],
+            r[t] >= c_lmp[t]*(eta*(x_soc[t]-x_soc[t+1]) + solar[t]) - M_2*z_buy[t],
+            # r[t] <= c_lmp[t]*(eta*(x_tsoc[t]-x_soc[t+1]) + solar[t]) + M_2*z_buy[t],
+            r[t] <= c_lmp[t]*(eta*(x_soc[t]-x_soc[t+1]) + solar[t]) + M_2*z_buy[t],
+        ]
+
+    objective = cp.Maximize(cp.sum(r))
+    prob = cp.Problem(objective, constraints)
+        
+    # solve model
+    print("solving MILP")
+    s_time = time.time()
+    prob.solve(solver=cp.GUROBI)
+    print("finished solving MILP in %.1fs" % (time.time()-s_time))
+
+    # get actions
+    # 0:= sell, 1:= null, 2:= buy
+    action_arr = np.zeros(T)
+    for t in range(T):
+        action_arr[t] = 0*z_sell.value[t] + 1*z_null.value[t] + 2*z_buy.value[t]
+
+    class Agent():
+        def __init__(self):
+            self.ct = 0
+
+        def act():
+            if self.ct >= len(action_arr):
+                print("received too many actions")
+            a_t = action_arr[self.ct % len(action_arr)]
+            self.ct += 1
+            return a_t
+
+    agent = Agent()
+    log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
+    validate(env, log_file, lambda obs : agent.act())
+
 if __name__ == "__main__":
-    perfect_no_solar()
+    # perfect_no_solar()
     # kperfect_with_solar()
+    # perfect_realistic('PAULSWT_1_N013', 'w23', solar_scale=0.25)
+    pass

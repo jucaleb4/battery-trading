@@ -33,6 +33,7 @@ from utils import TimelimitCallback
 from utils import SimpleLogger
 
 from bangbang import bang_bang_offline_training
+from perfect import perfect_realistic
 
 # import tune
 # import bangbang
@@ -524,6 +525,15 @@ def _run(settings):
                 settings['solar_scale'],
                 settings['solar_scale_test'],
                 settings["log_folder"],
+            )
+        elif settings['alg'] = 'milp':
+            perfect_realistic(
+                settings['pnode_id'],
+                settings['test_season'], 
+                settings["test_start_date"],
+                settings["test_len_dates"],
+                settings['solar_scale']
+                settings['log_folder'],
             )
         else:
             raise Exception("Unknown alg %s" % settings['alg'])
