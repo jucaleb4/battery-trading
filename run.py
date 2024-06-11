@@ -76,7 +76,7 @@ def validate(env, log_file, get_action):
     """
     obs, info = env.reset()
     all_info_keys = list(info.keys())
-    info_keys = ["solar_reward", "grid_reward", "soc", "curr_lmp", "net_load"]
+    info_keys = ["solar_reward", "grid_battery_reward", "solar_battery_reward", "soc", "soc_grid", "soc_solar", "curr_lmp", "net_load"]
     assert set(info_keys) <= set(all_info_keys)
 
     logger = SimpleLogger(log_file, info_keys)
@@ -447,6 +447,53 @@ def run_bangbang(
     log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
     validate(eval_env, log_file, get_action)
 
+def run_onlysell(
+        pnode_id: str,
+        seed: int,
+        train_season: str,
+        test_season: str,
+        train_start_date: int,
+        train_len_dates: int,
+        test_start_date: int,
+        test_len_dates: int,
+        solar_coloc: bool,
+        solar_scale: bool,
+        solar_scale_test: bool,
+        log_folder: str,
+    ):
+    """ Runs multiple DQN experiments
+
+    :param seed: 
+    """
+    env, _, eval_env = get_train_and_test_envs(
+        pnode_id,
+        seed,
+        n_history=4,
+        train_season=train_season,
+        test_season=test_season,
+        train_start_date=train_start_date,
+        train_len_dates=train_len_dates,
+        test_start_date=test_start_date,
+        test_len_dates=test_len_dates,
+        env_mode="default",
+        norm_obs=False,
+        norm_rwd=False,
+        more_data=False,
+        daily_cost=0,
+        delay_cost=False,
+        solar_coloc=solar_coloc,
+        solar_scale=solar_scale,
+        solar_scale_test=solar_scale_test,
+        preprocess_env=False,
+    )
+
+    # validation
+    sell, null, buy = 0, 1, 2
+    get_action = lambda obs : sell
+
+    log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
+    validate(eval_env, log_file, get_action)
+
 def _run(settings):
     seed_0 = settings["seed"] 
     for seed in range(seed_0, seed_0+settings["max_trials"]):
@@ -534,6 +581,20 @@ def _run(settings):
                 settings["test_len_dates"],
                 settings['solar_scale']
                 settings['log_folder'],
+        elif settings['alg'] == 'onlysell':
+            run_onlysell(
+                settings["pnode_id"],
+                seed,
+                settings["train_season"],
+                settings["test_season"],
+                settings["train_start_date"],
+                settings["train_len_dates"],
+                settings["test_start_date"],
+                settings["test_len_dates"],
+                settings['solar_coloc'],
+                settings['solar_scale'],
+                settings['solar_scale_test'],
+                settings["log_folder"],
             )
         else:
             raise Exception("Unknown alg %s" % settings['alg'])
