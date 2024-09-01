@@ -429,8 +429,9 @@ def run_bangbang(
     )
 
     # train
+    s_time = time.time()
     buy_price, sell_price = bang_bang_offline_training(env, max_iter=max_iters, seed=seed)
-
+    print(f"Finished training (time={time.time()-s_time:.2f}s)")
     # validation
     sell, null, buy = 0, 1, 2
     def get_action(obs):
