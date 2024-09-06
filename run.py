@@ -33,7 +33,7 @@ from utils import TimelimitCallback
 from utils import SimpleLogger
 
 from bangbang import bang_bang_offline_training
-from perfect import perfect_realistic
+from perfect import perfect_realistic, perfect_wo_solar, perfect_realistic_2
 
 # import tune
 # import bangbang
@@ -433,6 +433,7 @@ def run_bangbang(
     s_time = time.time()
     buy_price, sell_price = bang_bang_offline_training(env, max_iter=max_iters, seed=seed)
     print(f"Finished training (time={time.time()-s_time:.2f}s)")
+
     # validation
     sell, null, buy = 0, 1, 2
     def get_action(obs):
@@ -447,6 +448,20 @@ def run_bangbang(
 
     log_file = os.path.join(log_folder, "seed=%s.csv" % seed)
     validate(eval_env, log_file, get_action)
+
+def run_perfect(pnode_id, test_season, test_start_date, test_len_dates, solar_scale, log_folder):
+    # env, get_action = perfect_realistic(
+    env, get_action = perfect_realistic_2(
+    # env, get_action = perfect_wo_solar(
+        pnode_id,
+        test_season, 
+        test_start_date,
+        test_len_dates,
+        solar_scale,
+    )
+
+    log_file = os.path.join(log_folder, "seed=0.csv")
+    validate(env, log_file, get_action)
 
 def run_onlysell(
         pnode_id: str,
@@ -574,14 +589,15 @@ def _run(settings):
                 settings['solar_scale_test'],
                 settings["log_folder"],
             )
-        elif settings['alg'] = 'milp':
-            perfect_realistic(
+        elif settings['alg'] == 'milp':
+            run_perfect(
                 settings['pnode_id'],
                 settings['test_season'], 
                 settings["test_start_date"],
                 settings["test_len_dates"],
-                settings['solar_scale']
+                settings['solar_scale'],
                 settings['log_folder'],
+            )
         elif settings['alg'] == 'onlysell':
             run_onlysell(
                 settings["pnode_id"],
