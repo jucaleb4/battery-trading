@@ -3,13 +3,57 @@ import time
 
 import cvxpy as cp
 import numpy as np
-import gurobipy
+import gurobipy as gp
 import pandas as pd
 
 import gymnasium as gym
 import gym_examples
 
+def validate(env, log_file, get_action):
+    """
+    Validates actions on a realistic environment.
+    Saves the SoC, LMPs, actions, and cumualtive rewards. Note that the
+    actions will help one less element since it requires know the state first.
+
+    :param env: Gymnasium environment
+    :param log_file: filename we will save log to (must be .csv)
+
+    """
+    s_t, _ = env.reset()
+    T = 7*24*4
+    total_reward = 0
+
+    action_arr = np.zeros(T, dtype=int)
+    total_reward_arr = np.zeros(T+1, dtype=float)
+    soc_arr = np.append(s_t['battery_soc'][0], np.zeros(T, dtype=float))
+    lmp_arr = np.append(s_t['lmps'][0], np.zeros(T, dtype=float))
+
+    for t in range(T-1):
+        a_t = get_action(s_t)
+        s_t, r_t, term, trunc, _ = env.step(a_t)
+        assert not term, "Environment unexpectedly terminated at time %d/%d" % (t+1,T)
+        assert not trunc, "Environment unexpectedly truncated at time %d/%d" % (t+1,T)
+        total_reward += r_t
+
+        action_arr[t] = a_t
+        total_reward_arr[t+1] = total_reward
+        soc_arr[t+1] = s_t['battery_soc'][0]
+        lmp_arr[t+1] = s_t['lmps'][0]
+
+    # write to file
+    if not log_file.endswith('.csv'):
+        log_file = "%s.csv" % log_file
+    fp = open(log_file, "w+")
+    fp.write("soc,lmp,action,total_reward\n")
+    for t in range(T):
+        fp.write("%.2f,%.2f,%d,%.2f\n" % (soc_arr[t+1], lmp_arr[t+1], action_arr[t], total_reward_arr[t+1]))
+    fp.close()
+        
+
 def perfect_no_solar():
+    """ 
+    Solve perfect without solar
+    """
     # get the data
     data = "real"
     nhistory = 10
@@ -99,14 +143,20 @@ def perfect_no_solar():
         np.savetxt(fp, data_arr, fmt=fmt)
     print(f"Saved perfect data (total reward: {total_reward}")
 
-def perfect_with_solar():
+def perfect_foresight_benchmark(pnode, season):
+    """ 
+    Mixed-integer linear program for battery WITHOUT efficiency, degradation, nor
+    solar (to improve computational runtime). But we validate with these elements.
+    """
     # get the data
     data = "real"
     nhistory = 10
-    start_index = 76*4*24
+    start_index = (90-7)*4*24
     T = n_steps = (90*4*24)-start_index
     env = gym.make(
         "gym_examples/BatteryEnv-v0", 
+        pnode_id=pnode, 
+        season=season,
         nhistory=nhistory, 
         data=data, 
         mode="delay", 
@@ -115,16 +165,21 @@ def perfect_with_solar():
         max_episode_steps=n_steps, # can change length here!"
         solar_coloc=True,
     )
-    c_lmp = np.zeros(T)
-    solar = np.zeros(T)
-    s, _ = env.reset()
-    c_lmp[0] = s[1]
-    solar[0] = s[1+nhistory]
+    rt_lmp = np.zeros(T, dtype=float)
+    dam_lmp = np.zeros(T, dtype=float)
+    solar = np.zeros(T, dtype=float)
+
+    s, info = env.reset()
+    rt_lmp[0] = s['lmps'][0]
+    solar[0] = s['solars'][0]
+    dam_lmp[0] = info['curr_dam_lmp']
     for i in range(1,T):
-        s, _, _, _, _ = env.step(1)
-        c_lmp[i] = s[1]
-        solar[i] = s[1+nhistory]
-    rt_scale = 0.1
+        s, _, _, _, info = env.step(1)
+        rt_lmp[i] = s['lmps'][0]
+        solar[i] = s['solars'][0]
+        dam_lmp[i] = info['curr_dam_lmp']
+
+    rt_scale = 0.25 # 15min interval
     power = 100
     capacity = 400
     
@@ -143,8 +198,7 @@ def perfect_with_solar():
         A_battery[i,i] = -1
         A_battery[i,i+1] = 1
             
-    #A@x_h - A@r_h <= hydrogen_cap
-    prob = cp.Problem(cp.Maximize(c_lmp.T@(x_sell-x_buy)),
+    prob = cp.Problem(cp.Maximize(rt_lmp.T@(x_sell-x_buy)),
                       [x_buy + x_sell <= 1, \
                        x_soc[0] == 0, # 0 initial SoC
                        x_soc >= 0,
@@ -153,36 +207,26 @@ def perfect_with_solar():
         
     # solve model
     prob.solve(solver=cp.GUROBI)
+
+    print("Gurobi solver finished with %s" % prob.status)
+    if prob.status == "optimal":
+        print("Terminated with OPT* = %.2f" % prob.value)
     
-    action_arr = np.zeros(T)
-    total_reward_arr = np.zeros(T)
-    total_reward = 0
-    cost_queue = np.zeros(int(capacity/(rt_scale*power)))
-    ct = 0 
-    for t in range(T):
-        lmp = c_lmp[t]
-        a = 1
-        if x_buy.value[t] == 1:
-            if ct == len(cost_queue):
-                print(f"Exceeded battery capacity of {len(cost_queue)} charges!")
-                exit(-1)
-            cost_queue[ct] = lmp
-            total_reward -= lmp * rt_scale * power
-            ct += 1
-            a = 0
-        elif x_sell.value[t] == 1:
-            oldest_cost = cost_queue[0]
-            profit = (lmp - oldest_cost)*power
-            cost_queue[1:ct] = cost_queue[:ct-1]
-            ct -= 1
-            # total_reward += profit
-            total_reward += lmp * rt_scale * power
-            a = 2
-    
-        action_arr[t] = a
-        total_reward_arr[t] = total_reward
+    class Agent():
+        def __init__(self):
+            self.t = 0
+
+        def act(self):
+            a_t = 1 - int(x_buy.value[self.t] == 1) + int(x_sell.value[self.t] == 1)
+            self.t += 1
+            return a_t
     
     # save
+    fname = os.path.join("logs", "perfect_no_loss_pnode=%s_season=%s.csv" % (pnode, season))
+    agent = Agent()
+    validate(env, fname, lambda obs : agent.act())
+
+    """
     data_arr = np.array([x_soc.value[1:], c_lmp, action_arr, total_reward_arr]).T
     fmt="%1.2f,%1.2f,%i,%1.2e"
     fname = os.path.join("logs", f"perfect_solar_coloc={solar_coloc}.csv")
@@ -190,6 +234,7 @@ def perfect_with_solar():
         fp.write(b"soc,lmp,a,total_rwd\n")
         np.savetxt(fp, data_arr, fmt=fmt)
     print(f"Saved perfect data (total reward: {total_reward}")
+    """
 
 def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, solar_scale, log_folder):
     """ 
@@ -353,7 +398,7 @@ def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, so
         def __init__(self):
             self.ct = 0
 
-        def act():
+        def act(self):
             if self.ct >= len(action_arr):
                 print("received too many actions")
             a_t = action_arr[self.ct % len(action_arr)]
@@ -365,7 +410,9 @@ def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, so
     validate(env, log_file, lambda obs : agent.act())
 
 if __name__ == "__main__":
+    pnode = "ALAMT3G_7_B1"
+    season = 'w23'
+
     # perfect_no_solar()
-    # kperfect_with_solar()
+    perfect_foresight_benchmark(pnode, season)
     # perfect_realistic('PAULSWT_1_N013', 'w23', solar_scale=0.25)
-    pass
