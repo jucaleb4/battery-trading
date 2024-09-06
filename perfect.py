@@ -3,13 +3,57 @@ import time
 
 import cvxpy as cp
 import numpy as np
-import gurobipy
+import gurobipy as gp
 import pandas as pd
 
 import gymnasium as gym
 import gym_examples
 
+def validate(env, log_file, get_action):
+    """
+    Validates actions on a realistic environment.
+    Saves the SoC, LMPs, actions, and cumualtive rewards. Note that the
+    actions will help one less element since it requires know the state first.
+
+    :param env: Gymnasium environment
+    :param log_file: filename we will save log to (must be .csv)
+
+    """
+    s_t, _ = env.reset()
+    T = 7*24*4
+    total_reward = 0
+
+    action_arr = np.zeros(T, dtype=int)
+    total_reward_arr = np.zeros(T+1, dtype=float)
+    soc_arr = np.append(s_t['battery_soc'][0], np.zeros(T, dtype=float))
+    lmp_arr = np.append(s_t['lmps'][0], np.zeros(T, dtype=float))
+
+    for t in range(T-1):
+        a_t = get_action(s_t)
+        s_t, r_t, term, trunc, _ = env.step(a_t)
+        assert not term, "Environment unexpectedly terminated at time %d/%d" % (t+1,T)
+        assert not trunc, "Environment unexpectedly truncated at time %d/%d" % (t+1,T)
+        total_reward += r_t
+
+        action_arr[t] = a_t
+        total_reward_arr[t+1] = total_reward
+        soc_arr[t+1] = s_t['battery_soc'][0]
+        lmp_arr[t+1] = s_t['lmps'][0]
+
+    # write to file
+    if not log_file.endswith('.csv'):
+        log_file = "%s.csv" % log_file
+    fp = open(log_file, "w+")
+    fp.write("soc,lmp,action,total_reward\n")
+    for t in range(T):
+        fp.write("%.2f,%.2f,%d,%.2f\n" % (soc_arr[t+1], lmp_arr[t+1], action_arr[t], total_reward_arr[t+1]))
+    fp.close()
+        
+
 def perfect_no_solar():
+    """ 
+    Solve perfect without solar
+    """
     # get the data
     data = "real"
     nhistory = 10
@@ -99,7 +143,19 @@ def perfect_no_solar():
         np.savetxt(fp, data_arr, fmt=fmt)
     print(f"Saved perfect data (total reward: {total_reward}")
 
-def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
+def perfect_foresight_low_fidelity(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
+    """ 
+    Mixed-integer linear program for battery WITHOUT efficiency, degradation, nor
+    solar (to improve computational runtime). 
+
+    :param pnode_id: pnode to test on
+    :param test_season: which season to test (recommend w23 or S23)
+    :param test_start_date: where in test_season to start (e.g., 90-test_len_dates)
+    :param test_len_dates: how many dates to test (typically 7)
+    :param solar_scale: how much to scale solar
+    :return env: testing environment
+    :return get_action: function which upon inputting a state returns an action
+    """
     # get the data
     get_index = lambda x : 4*24*x
     T = get_index(test_len_dates)
@@ -107,7 +163,7 @@ def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, sol
     power = 100
     capacity = 400
     eta = 0.93      # efficiency
-    rt_scale = 0.25
+    rt_scale = 0.25 # 15min = 0.25hr interval
     env = gym.make(
         id="gym_examples/BatteryEnv-v0", 
         battery_capacity=capacity,
@@ -129,16 +185,20 @@ def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, sol
         reset_offset=0,
     )
 
-    c_lmp = np.zeros(T)
-    solar = np.zeros(T)
-    s, _ = env.reset()
-    c_lmp[0] = s['lmps'][0]
+    rt_lmp = np.zeros(T, dtype=float)
+    dam_lmp = np.zeros(T, dtype=float)
+    solar = np.zeros(T, dtype=float)
+
+    s, info = env.reset()
+    rt_lmp[0] = s['lmps'][0]
     solar[0] = s['solars'][0]
+    dam_lmp[0] = info['curr_dam_lmp']
     for i in range(1,T):
-        s, _, _, _, _ = env.step(1)
-        c_lmp[i] = s['lmps'][0]
+        s, _, _, _, info = env.step(1)
+        rt_lmp[i] = s['lmps'][0]
         solar[i] = s['solars'][0]
-    
+        dam_lmp[i] = info['curr_dam_lmp']
+
     # create model
     x_buy = cp.Variable(T, boolean=True)
     x_sell = cp.Variable(T, boolean=True)
@@ -155,8 +215,7 @@ def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, sol
         A_battery[i,i] = -1
         A_battery[i,i+1] = 1
             
-    #A@x_h - A@r_h <= hydrogen_cap
-    prob = cp.Problem(cp.Maximize(c_lmp.T@(x_sell-x_buy)),
+    prob = cp.Problem(cp.Maximize(rt_lmp.T@(x_sell-x_buy)),
                       [x_buy + x_sell <= 1, \
                        x_soc[0] == 0, # 0 initial SoC
                        x_soc >= 0,
@@ -165,12 +224,10 @@ def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, sol
         
     # solve modee
     prob.solve(solver=cp.GUROBI)
-    
-    # get actions
-    # 0:= sell, 1:= null, 2:= buy
-    action_arr = np.zeros(T, dtype=int)
-    for t in range(T):
-        action_arr[t] = round(-1*x_sell.value[t] + 1*x_buy.value[t] + 1)
+
+    print("Gurobi solver finished with %s" % prob.status)
+    if prob.status == "optimal":
+        print("Terminated with OPT* = %.2f" % prob.value)
 
     class Agent():
         def __init__(self):
@@ -187,10 +244,12 @@ def perfect_wo_solar(pnode_id, test_season, test_start_date, test_len_dates, sol
     get_action = lambda obs: agent.act()
     return env, get_action
 
-def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
+def perfect_foresight_medium_fidelity(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
     """ 
-    Mixed-integer linear program for battery with efficiency, degradation, and
-    solar.
+    Mixed-integer linear program for battery WITH solar but WITHOUT efficiency
+    nor degradation.
+
+    See function @perfect_foresight_low_fidelity for details on params and returns
     """
     get_index = lambda x : int(4*24*x)
     T = get_index(test_len_dates)
@@ -368,10 +427,12 @@ def perfect_realistic(pnode_id, test_season, test_start_date, test_len_dates, so
     get_action = lambda obs: agent.act()
     return env, get_action
 
-def perfect_realistic_2(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
+def perfect_foresight_high_fidelity(pnode_id, test_season, test_start_date, test_len_dates, solar_scale):
     """ 
     Mixed-integer linear program for battery with efficiency, degradation, and
     solar.
+
+    See function @perfect_foresight_low_fidelity for details on params and returns
     """
     get_index = lambda x : 4*24*x
     T = get_index(test_len_dates)
@@ -541,7 +602,9 @@ def perfect_realistic_2(pnode_id, test_season, test_start_date, test_len_dates, 
     return env, get_action
 
 if __name__ == "__main__":
+    pnode = "ALAMT3G_7_B1"
+    season = 'w23'
+
     # perfect_no_solar()
-    # kperfect_with_solar()
+    # perfect_foresight_benchmark(pnode, season)
     # perfect_realistic('PAULSWT_1_N013', 'w23', solar_scale=0.25)
-    pass
