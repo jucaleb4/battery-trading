@@ -11,8 +11,6 @@ import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 
-import gymnasium as gym
-import gym_examples
 
 class LSTM(nn.Module):
 
@@ -34,6 +32,9 @@ def fetch_pnode_lmp(pnode_id, season):
     (recall we use the first 90-7 for training and remaining 7 for testing) and
     saves it as a csv file.
     """
+    import gymnasium as gym
+    import gym_examples
+
     get_index = lambda x : 4*24*x
     start_date = 0
     len_date = 90
@@ -123,30 +124,30 @@ def predict_prices(pnode_id, season, max_duration=3600):
 
         print(f'Epoch: {i+1:2} Loss: {loss.item():10.8f} (time: {time.time() - s_time:.0f}s)')
 
+        # predict prices
+        preds = train_set[-window_size:].tolist()
+        for f in range(future):
+            seq = torch.FloatTensor(preds[-window_size:])
+            with torch.no_grad():
+                model.hidden = (torch.zeros(1,1,model.hidden_size),
+                               torch.zeros(1,1,model.hidden_size))
+                preds.append(model(seq).item())
+
+        preds = preds[window_size:]
+        # save last set of predicted prices
+        fname = "%s/%s_%s_predicted_rt_lmps_epoch=%d.csv" % (folder_name, pnode_id, season, n_epochs)
+        fp = open(fname, "w+")
+        for t in range(len(preds)):
+            fp.write("%.2f" % preds[t])
+            if t < len(preds)-1:
+                fp.write("\n")
+        fp.close()
+
         # break after 1 hour
         if time.time() - s_time > max_duration:
             break
 
     print(f'\nDuration: {time.time() - s_time:.0f} seconds')
-
-    # predict prices
-    preds = train_set[-window_size:].tolist()
-    for f in range(future):
-        seq = torch.FloatTensor(preds[-window_size:])
-        with torch.no_grad():
-            model.hidden = (torch.zeros(1,1,model.hidden_size),
-                           torch.zeros(1,1,model.hidden_size))
-            preds.append(model(seq).item())
-    preds = preds[window_size:]
-
-    # save last set of predicted prices
-    fname = "%s/%s_%s_predicted_rt_lmps.csv" % (folder_name, pnode_id, season)
-    fp = open(fname, "w+")
-    for t in range(len(preds)):
-        fp.write("%.2f" % preds[t])
-        if t < len(preds)-1:
-            fp.write("\n")
-    fp.close()
 
     # plot 
     fname = "%s/%s_%s_test_v_predicted_rt_lmps.png" % (folder_name, pnode_id, season)
@@ -161,8 +162,8 @@ def predict_prices(pnode_id, season, max_duration=3600):
 seasons = ['S23', 'w23']
 pnodes  = ['PAULSWT_1_N013', 'COTWDPGE_1_N001', 'ALAMT3G_7_B1']
 
-predict_prices(pnodes[0], seasons[0], max_duration=60)
-exit(0)
+for season in seasons:
+    predict_prices(pnodes[1], seasons[0], max_duration=3600)
 
 for pnode in pnodes:
     for season in seasons:
