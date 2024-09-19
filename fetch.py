@@ -78,7 +78,7 @@ def input_data(seq,ws):
     
     return out
 
-def predict_prices(pnode_id, season, max_duration=3600):
+def predict_prices(pnode_id, season, max_duration=3600, stepsize="adam"):
     """ 
     Trains LSTM model on first 84 days, then we predict remaining 7 days 
 
@@ -101,8 +101,10 @@ def predict_prices(pnode_id, season, max_duration=3600):
     torch.manual_seed(42)
     model = LSTM(hidden_size=100)
     criterion = nn.MSELoss()
-    # optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    if stepsize == "adam":
+        optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    else:
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
 
     epochs = 100
     future = 7*24*4 # amount to predict
@@ -135,7 +137,7 @@ def predict_prices(pnode_id, season, max_duration=3600):
 
         preds = preds[window_size:]
         # save last set of predicted prices
-        fname = "%s/%s_%s_predicted_rt_lmps_epoch=%d.csv" % (folder_name, pnode_id, season, n_epochs)
+        fname = "%s/%s_%s_predicted_rt_lmps_stepsize=%s_epoch=%d.csv" % (folder_name, pnode_id, season, stepsize, n_epochs)
         fp = open(fname, "w+")
         for t in range(len(preds)):
             fp.write("%.2f" % preds[t])
@@ -150,7 +152,7 @@ def predict_prices(pnode_id, season, max_duration=3600):
     print(f'\nDuration: {time.time() - s_time:.0f} seconds')
 
     # plot 
-    fname = "%s/%s_%s_test_v_predicted_rt_lmps.png" % (folder_name, pnode_id, season)
+    fname = "%s/%s_%s_test_v_predicted_rt_lmps_stepsize=%s.png" % (folder_name, pnode_id, season, stepsize)
     plt.style.use("ggplot")
     ax = plt.subplot()
     ax.plot(test_set, label="true", linestyle="solid", color="black")
@@ -160,10 +162,12 @@ def predict_prices(pnode_id, season, max_duration=3600):
     plt.savefig(fname, dpi=240)
 
 seasons = ['S23', 'w23']
+stepsizes = ["sgd", "adam"]
 pnodes  = ['PAULSWT_1_N013', 'COTWDPGE_1_N001', 'ALAMT3G_7_B1']
 
 for season in seasons:
-    predict_prices(pnodes[1], seasons[0], max_duration=3600)
+    for stepsize in stepsizes:
+        predict_prices(pnodes[1], seasons[0], max_duration=3600, stepsize=stepsize)
 
 for pnode in pnodes:
     for season in seasons:
