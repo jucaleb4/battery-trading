@@ -127,8 +127,12 @@ def predict_prices(pnode_id, season, max_duration=3600, stepsize="adam"):
         print(f'Epoch: {i+1:2} Loss: {loss.item():10.8f} (time: {time.time() - s_time:.0f}s)')
 
         # predict prices
+        n_steps_in_day = 4*24
         preds = train_set[-window_size:].tolist()
         for f in range(future):
+            # every 24 hours, we get new data
+            if f % n_steps_in_day == 0 and f >= n_steps_in_day:
+                preds[-window_size:] = test_set[future-n_steps_in_day:future+window_size-n_steps_in_day]
             seq = torch.FloatTensor(preds[-window_size:])
             with torch.no_grad():
                 model.hidden = (torch.zeros(1,1,model.hidden_size),
@@ -161,14 +165,14 @@ def predict_prices(pnode_id, season, max_duration=3600, stepsize="adam"):
     plt.tight_layout()
     plt.savefig(fname, dpi=240)
 
-seasons = ['S23', 'w23']
-stepsizes = ["sgd", "adam"]
-pnodes  = ['PAULSWT_1_N013', 'COTWDPGE_1_N001', 'ALAMT3G_7_B1']
+season_arr = ['S23', 'w23']
+stepsize_arr = ["sgd", "adam"]
+pnode_arr  = ['PAULSWT_1_N013', 'COTWDPGE_1_N001', 'ALAMT3G_7_B1']
 
-for season in seasons:
-    for stepsize in stepsizes:
-        predict_prices(pnodes[1], seasons[0], max_duration=3600, stepsize=stepsize)
+for stepsize in stepsize_arr:
+    for season in season_arr:
+        predict_prices(pnode_arr[1], season, max_duration=3600, stepsize=stepsize)
 
-for pnode in pnodes:
-    for season in seasons:
-        fetch_pnode_lmp(pnode, season)
+# for pnode in pnodes:
+#     for season in seasons:
+#         fetch_pnode_lmp(pnode, season)
